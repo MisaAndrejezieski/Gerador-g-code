@@ -1,132 +1,140 @@
 import os
-import tkinter as tk
-from tkinter import filedialog, messagebox
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 import plotly.graph_objects as go
+from tkinter import Tk, filedialog, messagebox
 
-# === CONFIGURAÇÕES DE PASTAS ===
-PASTA_BASE = os.path.dirname(os.path.abspath(__file__))
-PASTA_IMAGENS = os.path.join(PASTA_BASE, "Imagens")
+# =============================================================
+# CONFIGURAÇÕES GERAIS
+# =============================================================
+PASTA_IMAGENS = os.path.join(os.getcwd(), "Imagens")
 os.makedirs(PASTA_IMAGENS, exist_ok=True)
 
-# === ESCALAS DO PROJETO ===
-ALTURA_MAX_MM = 3000  # 3 metros
-LARGURA_MAX_MM = 2000  # 2 metros
-PROFUNDIDADE_MAX_MM = 30  # profundidade do entalhe em mm
+GCODE_PATH = os.path.join(PASTA_IMAGENS, "relevo.gcode")
+NC_PATH = os.path.join(PASTA_IMAGENS, "relevo_3d.nc")
+PREVIEW_3D = os.path.join(PASTA_IMAGENS, "preview_3d.png")
 
-# === SELECIONA A IMAGEM ===
+# Escalas reais em milímetros
+LARGURA_MM = 2000   # 2 metros
+ALTURA_MM = 3000    # 3 metros
+PROFUNDIDADE_MM = 30  # profundidade máxima (Z)
+
+# =============================================================
+# FUNÇÃO: SELECIONAR IMAGEM
+# =============================================================
 def selecionar_imagem():
-    root = tk.Tk()
-    root.withdraw()
+    Tk().withdraw()
     caminho = filedialog.askopenfilename(
         title="Selecione a imagem para gerar o relevo",
-        filetypes=[("Imagens", "*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff")]
+        filetypes=[("Imagens", "*.jpg *.jpeg *.png *.bmp *.tif")]
     )
+    if not caminho:
+        messagebox.showwarning("Aviso", "Nenhuma imagem selecionada.")
+        exit()
     return caminho
 
-# === GERA RELEVO 3D ===
-def gerar_relevo(caminho_imagem):
-    if not caminho_imagem or not os.path.exists(caminho_imagem):
-        raise FileNotFoundError(f"Imagem '{caminho_imagem}' não encontrada.")
+# =============================================================
+# FUNÇÃO: GERAR RELEVO 3D
+# =============================================================
+def gerar_relevo(imagem_path):
+    if not os.path.exists(imagem_path):
+        raise FileNotFoundError(f"Imagem '{imagem_path}' não encontrada.")
 
-    print("📸 Carregando imagem:", caminho_imagem)
-    imagem = Image.open(caminho_imagem).convert("L")
+    print("\n📂 Abrindo imagem...")
+    img = Image.open(imagem_path).convert("L")
 
-    # Redimensiona a imagem para 2000x3000mm (proporcional)
-    largura, altura = imagem.size
-    proporcao = min(LARGURA_MAX_MM / largura, ALTURA_MAX_MM / altura)
-    nova_largura = int(largura * proporcao)
-    nova_altura = int(altura * proporcao)
-    imagem = imagem.resize((nova_largura, nova_altura))
+    # Reduz automaticamente se for muito grande
+    max_size = (1000, 1500)
+    if img.size[0] > max_size[0] or img.size[1] > max_size[1]:
+        print("⚙️  Redimensionando imagem para processamento...")
+        img.thumbnail(max_size, Image.Resampling.LANCZOS)
 
-    matriz = np.array(imagem)
-    matriz = np.flipud(matriz)
+    print("🔄 Invertendo tons e preparando matriz de relevo...")
+    img = ImageOps.invert(img)
+    img = img.rotate(-90, expand=True)
 
-    # Normaliza altura (Z)
-    z = (matriz / 255.0) * PROFUNDIDADE_MAX_MM
+    img_resized = img.resize((740, 1900), Image.Resampling.LANCZOS)
+    heightmap_array = np.array(img_resized, dtype=np.float32) / 255.0 * PROFUNDIDADE_MM
 
-    # Cria coordenadas X e Y
-    x = np.linspace(0, LARGURA_MAX_MM, nova_largura)
-    y = np.linspace(0, ALTURA_MAX_MM, nova_altura)
-    X, Y = np.meshgrid(x, y)
+    print("💾 Salvando heightmap normalizado...")
+    heightmap_img = Image.fromarray(np.uint8(heightmap_array / PROFUNDIDADE_MM * 255))
+    heightmap_img.save(os.path.join(PASTA_IMAGENS, "heightmap.png"))
 
-    # === VISUALIZAÇÃO 3D ===
-    fig = go.Figure(data=[go.Surface(
-        z=z,
-        x=X,
-        y=Y,
-        colorscale="gray",
-        showscale=True
-    )])
+    return heightmap_array
 
+# =============================================================
+# FUNÇÃO: GERAR VISUALIZAÇÃO 3D
+# =============================================================
+def gerar_preview_3d(heightmap):
+    print("🖼️  Gerando visualização 3D...")
+
+    y, x = np.mgrid[0:heightmap.shape[0], 0:heightmap.shape[1]]
+    fig = go.Figure(data=[go.Surface(z=heightmap, x=x, y=y, colorscale="gray")])
     fig.update_layout(
         title="Pré-visualização 3D — Relevo em Madeira",
         scene=dict(
             xaxis_title="Largura (mm)",
             yaxis_title="Altura (mm)",
             zaxis_title="Profundidade (mm)",
-            aspectratio=dict(x=2, y=3, z=0.3),
-            camera=dict(eye=dict(x=1.2, y=1.2, z=0.6))
+            aspectratio=dict(x=2, y=3, z=0.2),
+            camera=dict(eye=dict(x=1.4, y=1.4, z=0.8))
         ),
-        template="plotly_dark"
+        margin=dict(l=0, r=0, b=0, t=40)
     )
 
-    caminho_preview = os.path.join(PASTA_IMAGENS, "preview_3d.png")
-    fig.write_image(caminho_preview)
-    fig.show()
+    fig.write_image(PREVIEW_3D, width=1200, height=900, scale=2)
+    print(f"✅ Pré-visualização salva em: {PREVIEW_3D}")
 
-    print(f"🖼️ Preview 3D salvo em: {caminho_preview}")
-    return X, Y, z
+# =============================================================
+# FUNÇÃO: GERAR G-CODE E ARQUIVO NC
+# =============================================================
+def gerar_gcode(heightmap, gcode_path, nc_path):
+    print("🛠️  Gerando G-code...")
+    h, w = heightmap.shape
 
+    step_x = LARGURA_MM / w
+    step_y = ALTURA_MM / h
 
-# === GERA O G-CODE ===
-def gerar_gcode(X, Y, Z):
-    caminho_gcode = os.path.join(PASTA_IMAGENS, "relevo.gcode")
-    caminho_nc = os.path.join(PASTA_IMAGENS, "relevo_3d.nc")
+    with open(gcode_path, "w") as g:
+        g.write("(G-code gerado automaticamente)\nG21 ; Unidades em mm\nG90 ; Posição absoluta\n")
+        g.write("G0 Z5.000 ; Levantar ferramenta\n")
 
-    print("⚙️ Gerando G-code...")
-
-    with open(caminho_gcode, "w") as f:
-        f.write("G21 ; Define unidades em milímetros\n")
-        f.write("G90 ; Modo de posicionamento absoluto\n")
-        f.write("G1 F800 ; Define velocidade de avanço\n")
-
-        for i in range(len(Y)):
-            if i % 2 == 0:
-                x_seq = range(len(X[0]))
+        for j in range(h):
+            linha = heightmap[j]
+            if j % 2 == 0:
+                xs = range(w)
             else:
-                x_seq = reversed(range(len(X[0])))
+                xs = range(w - 1, -1, -1)
 
-            for j in x_seq:
-                f.write(f"G1 X{X[i][j]:.2f} Y{Y[i][j]:.2f} Z{-Z[i][j]:.2f}\n")
+            for i in xs:
+                x = i * step_x
+                y = j * step_y
+                z = -linha[i]
+                g.write(f"G1 X{x:.3f} Y{y:.3f} Z{z:.3f} F800\n")
 
-        f.write("G0 Z5 ; Retorna para posição segura\n")
-        f.write("M30 ; Fim do programa\n")
+            g.write("G0 Z5.000\n")
 
-    # copia para .nc
-    with open(caminho_gcode, "r") as src, open(caminho_nc, "w") as dst:
-        dst.write(src.read())
+        g.write("G0 Z10.000\nM30 ; Fim do programa\n")
 
-    print(f"✅ G-code salvo em: {caminho_gcode}")
-    print(f"✅ Arquivo CNC (.nc) salvo em: {caminho_nc}")
+    os.replace(gcode_path, nc_path)
+    print(f"✅ G-code salvo em: {gcode_path}")
+    print(f"✅ Arquivo NC salvo em: {nc_path}")
 
-
-# === EXECUÇÃO PRINCIPAL ===
+# =============================================================
+# FUNÇÃO PRINCIPAL
+# =============================================================
 def main():
-    caminho = selecionar_imagem()
-    if not caminho:
-        messagebox.showerror("Erro", "Nenhuma imagem foi selecionada.")
-        return
+    print("\n=== GERADOR DE RELEVO 3D E G-CODE ===\n")
+    imagem_path = selecionar_imagem()
 
     try:
-        X, Y, Z = gerar_relevo(caminho)
-        gerar_gcode(X, Y, Z)
-        messagebox.showinfo("Concluído", "Relevo 3D e G-code gerados com sucesso!")
+        heightmap = gerar_relevo(imagem_path)
+        gerar_preview_3d(heightmap)
+        gerar_gcode(heightmap, GCODE_PATH, NC_PATH)
+        messagebox.showinfo("Concluído", "✅ Relevo 3D e G-code gerados com sucesso!")
     except Exception as e:
-        messagebox.showerror("Erro", str(e))
-        print("❌ Erro:", e)
-
+        messagebox.showerror("Erro", f"Ocorreu um erro: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main()
