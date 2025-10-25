@@ -305,7 +305,7 @@ def processar_imagem_ia(img_path, largura_mm, altura_mm, profundidade_max, passo
         return None, None
 
 # ==============================================
-# INTERFACE GRÁFICA
+# INTERFACE GRÁFICA CORRIGIDA
 # ==============================================
 
 class GeradorCNCIA:
@@ -315,23 +315,39 @@ class GeradorCNCIA:
         
     def setup_ui(self):
         self.root.title("Gerador de G-code CNC com IA")
-        self.root.geometry("700x650")
+        self.root.geometry("700x700")  # Aumentei a altura para caber tudo
         self.root.resizable(True, True)
         
         # Configurar estilo
         self.setup_styles()
         
-        # Frame principal
-        main_frame = ttk.Frame(self.root, padding=25)
+        # Frame principal com scroll
+        main_frame = ttk.Frame(self.root, padding=20)
         main_frame.pack(fill="both", expand=True)
         
+        # Canvas e Scrollbar para conteúdo rolável
+        canvas = tk.Canvas(main_frame)
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
         # Título
-        title = ttk.Label(main_frame, text="🛠 CNC ROUTER COM INTELIGÊNCIA ARTIFICIAL", 
+        title = ttk.Label(scrollable_frame, text="🛠 CNC ROUTER COM INTELIGÊNCIA ARTIFICIAL", 
                          font=("Segoe UI", 16, "bold"))
-        title.grid(row=0, column=0, columnspan=3, pady=(0, 20))
+        title.grid(row=0, column=0, columnspan=2, pady=(0, 20))
         
         # Criar widgets
-        self.create_widgets(main_frame)
+        self.create_widgets(scrollable_frame)
         
     def setup_styles(self):
         style = ttk.Style()
@@ -339,6 +355,7 @@ class GeradorCNCIA:
         style.configure("TButton", font=("Segoe UI", 10, "bold"))
         style.configure("Title.TLabel", font=("Segoe UI", 12, "bold"))
         style.configure("Checkbox.TCheckbutton", font=("Segoe UI", 10))
+        style.configure("Generate.TButton", font=("Segoe UI", 12, "bold"), background="#4CAF50")
         
     def create_widgets(self, parent):
         row = 1
@@ -348,7 +365,7 @@ class GeradorCNCIA:
         row += 1
         
         frame_imagem = ttk.Frame(parent)
-        frame_imagem.grid(row=row, column=0, columnspan=3, sticky="ew", pady=5)
+        frame_imagem.grid(row=row, column=0, columnspan=2, sticky="ew", pady=5)
         
         self.entry_imagem = ttk.Entry(frame_imagem, width=60)
         self.entry_imagem.pack(side="left", fill="x", expand=True, padx=(0, 10))
@@ -360,7 +377,7 @@ class GeradorCNCIA:
         row += 1
         
         frame_ia = ttk.Frame(parent)
-        frame_ia.grid(row=row, column=0, columnspan=3, sticky="ew", pady=10)
+        frame_ia.grid(row=row, column=0, columnspan=2, sticky="ew", pady=10)
         
         self.uso_ia = tk.BooleanVar(value=True)
         ttk.Checkbutton(frame_ia, text="Usar Inteligência Artificial para análise de relevos", 
@@ -396,15 +413,20 @@ class GeradorCNCIA:
             ttk.Label(parent, text=label, style="Title.TLabel").grid(row=row, column=0, sticky="w", pady=(15,5))
             row += 1
             
-            entry = ttk.Entry(parent, width=20, font=("Segoe UI", 10))
+            entry = ttk.Entry(parent, width=25, font=("Segoe UI", 10))
             entry.insert(0, default)
-            entry.grid(row=row, column=0, sticky="w", pady=2)
+            entry.grid(row=row, column=0, sticky="w", pady=2, padx=(20,0))
             setattr(self, attr_name, entry)
             row += 1
         
-        # Botão gerar
-        btn_gerar = ttk.Button(parent, text="🚀 GERAR G-CODE COM IA", 
-                              command=self.gerar, style="TButton")
+        # BOTÃO GERAR - AGORA VISÍVEL
+        ttk.Label(parent, text="", style="Title.TLabel").grid(row=row, column=0, pady=(20,0))
+        row += 1
+        
+        btn_gerar = ttk.Button(parent, text="🚀 GERAR G-CODE", 
+                              command=self.gerar, 
+                              style="Generate.TButton",
+                              width=20)
         btn_gerar.grid(row=row, column=0, columnspan=2, pady=30)
         row += 1
         
@@ -412,7 +434,7 @@ class GeradorCNCIA:
         rodape = ttk.Label(parent, 
                           text="© 2025 - CNC Router IA - Análise inteligente de relevos | Versão 2.0", 
                           font=("Segoe UI", 8), foreground="gray")
-        rodape.grid(row=row, column=0, columnspan=2, pady=10)
+        rodape.grid(row=row, column=0, columnspan=2, pady=20)
         
         # Configurar grid
         parent.columnconfigure(0, weight=1)
@@ -425,11 +447,12 @@ class GeradorCNCIA:
         if caminho:
             self.entry_imagem.delete(0, tk.END)
             self.entry_imagem.insert(0, caminho)
+            messagebox.showinfo("Imagem Selecionada", f"Imagem carregada:\n{os.path.basename(caminho)}")
             
     def gerar(self):
         try:
             img_path = self.entry_imagem.get()
-            if not os.path.exists(img_path):
+            if not img_path or not os.path.exists(img_path):
                 messagebox.showwarning("Aviso", "Selecione uma imagem válida.")
                 return
 
@@ -454,6 +477,9 @@ class GeradorCNCIA:
                 if not messagebox.askyesno("Confirmação", "Passo muito pequeno pode gerar arquivos enormes. Continuar?"):
                     return
 
+            # Mostrar mensagem de processamento
+            messagebox.showinfo("Processando", "Iniciando processamento da imagem...\nIsso pode levar alguns minutos.")
+            
             # Processar imagem
             gcode_path, output_dir = processar_imagem_ia(img_path, **params)
 
