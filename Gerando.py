@@ -28,112 +28,57 @@ class AICNCProcessor:
                 
         except Exception as e:
             print(f"Erro no processamento IA: {e}")
-            # Fallback para método tradicional suave
             return self._processar_tradicional(image_array, profundidade_max)
 
     def _processar_preservando_detalhes(self, image_array, profundidade_max):
         """
         Técnica avançada que preserva MAXIMAMENTE os detalhes da imagem original
         """
-        # 1. MANTER FIDELIDADE VISUAL COMPLETA
-        # A imagem processada deve ser uma réplica 3D fiel da original
-        
-        # Suavizar levemente para reduzir ruído, mas manter detalhes
         img_suavizada = cv2.GaussianBlur(image_array, (3, 3), 0.8)
         
-        # 2. REALCE DE DETALHES PARA CNC
-        # Usar filtro de aguçamento para destacar características importantes
         kernel_aguçamento = np.array([[-1, -1, -1],
                                     [-1,  9, -1],
                                     [-1, -1, -1]])
         img_detalhada = cv2.filter2D(img_suavizada, -1, kernel_aguçamento)
         
-        # 3. MAPEAMENTO DIRETO E FIEL
-        # Converter diretamente a intensidade para profundidade
-        # Áreas CLARAS = MENOS profundidade (ficam mais altas)
-        # Áreas ESCURAS = MAIS profundidade (ficam mais baixas)
-        
-        # Inverter para CNC: escuro = corta mais fundo
         z_map = (1 - img_detalhada) * profundidade_max
-        
-        # 4. AJUSTE DE CONTRASTE PARA OTIMIZAR USINAGEM
-        # Aplicar curva gamma para melhor distribuição de profundidades
-        gamma = 0.8  # Valor < 1 realça áreas escuras
+        gamma = 0.8
         z_map = np.power(z_map / profundidade_max, gamma) * profundidade_max
         
-        # 5. PRESERVAR BORDAS ORIGINAIS
-        # Detectar bordas da imagem original
         bordas = cv2.Canny((image_array * 255).astype(np.uint8), 50, 150) / 255.0
-        
-        # Suavizar transições mas preservar bordas importantes
         z_map_suavizado = cv2.bilateralFilter(z_map.astype(np.float32), 5, 50, 50)
         
-        # Combinar: manter bordas originais nítidas
         mascara_bordas = bordas > 0.1
         z_map_suavizado[mascara_bordas] = z_map[mascara_bordas]
         
-        print("✅ Processamento 'Preservar Detalhes' aplicado")
         return z_map_suavizado
 
     def _processar_relevo_natural(self, image_array, profundidade_max):
-        """
-        Cria relevo natural baseado na percepção visual humana
-        """
-        # 1. ENFATIZAR CONTRASTES NATURAIS
         img_contraste = self._ajustar_contraste_perceptivo(image_array)
-        
-        # 2. MAPEAMENTO BASEADO EM PERCEPÇÃO VISUAL
-        # Olho humano é mais sensível a médios tons
         z_map = self._mapeamento_perceptivo(img_contraste, profundidade_max)
-        
-        # 3. SUAVIZAÇÃO INTELIGENTE
         z_map = cv2.bilateralFilter(z_map.astype(np.float32), 7, 30, 30)
-        
-        print("✅ Processamento 'Relevo Natural' aplicado")
         return z_map
 
     def _processar_tradicional(self, image_array, profundidade_max):
-        """
-        Método tradicional melhorado
-        """
-        # Simples e direto - máximo de fidelidade
         z_map = (1 - image_array) * profundidade_max
-        
-        # Suavização mínima para evitar ruído
         z_map = cv2.GaussianBlur(z_map, (2, 2), 0.5)
-        
-        print("✅ Processamento 'Tradicional' aplicado")
         return z_map
 
     def _ajustar_contraste_perceptivo(self, image_array):
-        """
-        Ajusta contraste baseado em curva perceptiva
-        """
-        # Curve de ajuste para melhor percepção visual
-        img_ajustada = np.power(image_array, 0.7)
-        return img_ajustada
+        return np.power(image_array, 0.7)
 
     def _mapeamento_perceptivo(self, image_array, profundidade_max):
-        """
-        Mapeamento que considera a sensibilidade visual humana
-        """
-        # Realçar médios tons onde o olho humano é mais sensível
         media = np.mean(image_array)
         desvio = np.std(image_array)
         
-        # Criar curva de resposta não-linear
         z_map = np.zeros_like(image_array)
-        
-        # Áreas muito escuras: profundidade máxima
         mascara_escuro = image_array < (media - desvio/2)
-        z_map[mascara_escuro] = profundidade_max * 0.9
-        
-        # Áreas muito claras: profundidade mínima
         mascara_claro = image_array > (media + desvio/2)
+        mascara_medio = ~(mascara_escuro | mascara_claro)
+        
+        z_map[mascara_escuro] = profundidade_max * 0.9
         z_map[mascara_claro] = profundidade_max * 0.1
         
-        # Áreas médias: transição suave
-        mascara_medio = ~(mascara_escuro | mascara_claro)
         if np.any(mascara_medio):
             intensidades_medio = image_array[mascara_medio]
             z_map[mascara_medio] = (1 - intensidades_medio) * profundidade_max * 0.8 + profundidade_max * 0.1
@@ -141,38 +86,30 @@ class AICNCProcessor:
         return z_map
 
 # ==============================================
-# FUNÇÕES AUXILIARES MELHORADAS
+# FUNÇÕES AUXILIARES
 # ==============================================
 
 def salvar_comparacao_visual(img_original, z_map_final, output_dir):
-    """
-    Salva comparação visual entre original e resultado 3D
-    """
     try:
         fig, axes = plt.subplots(1, 3, figsize=(18, 6))
         
-        # Imagem Original
         axes[0].imshow(img_original, cmap='gray')
-        axes[0].set_title('IMAGEM ORIGINAL\n(Referência Visual)')
+        axes[0].set_title('IMAGEM ORIGINAL')
         axes[0].axis('off')
         
-        # Mapa de Profundidade
         im2 = axes[1].imshow(z_map_final, cmap='viridis')
-        axes[1].set_title('MAPA DE PROFUNDIDADE 3D\n(Resultado para CNC)')
+        axes[1].set_title('MAPA DE PROFUNDIDADE 3D')
         axes[1].axis('off')
         plt.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
         
-        # Sobreposição (visualização híbrida)
         img_rgb = np.stack([img_original] * 3, axis=-1)
         depth_normalized = z_map_final / z_map_final.max() if z_map_final.max() > 0 else z_map_final
-        
-        # Criar visualização de calor sobreposta
         heatmap = plt.cm.viridis(depth_normalized)
         alpha = 0.6
         sobreposicao = img_rgb * (1 - alpha) + heatmap[:, :, :3] * alpha
         
         axes[2].imshow(sobreposicao)
-        axes[2].set_title('SOBREPOSIÇÃO\n(Original + Profundidade)')
+        axes[2].set_title('SOBREPOSIÇÃO')
         axes[2].axis('off')
         
         plt.tight_layout()
@@ -180,66 +117,21 @@ def salvar_comparacao_visual(img_original, z_map_final, output_dir):
                    dpi=150, bbox_inches='tight', facecolor='white')
         plt.close()
         
-        print("✅ Comparação visual salva com sucesso!")
-        
     except Exception as e:
-        print(f"⚠️ Aviso: Não foi possível salvar comparação visual: {e}")
-
-def salvar_imagens_processo(img_array, z_map, output_dir, uso_ia):
-    """
-    Salva imagens do processo para verificação
-    """
-    try:
-        # Heightmap para visualização
-        if z_map.max() > 0:
-            heightmap_vis = (z_map / z_map.max() * 255).astype(np.uint8)
-        else:
-            heightmap_vis = np.zeros_like(z_map, dtype=np.uint8)
-            
-        heightmap_img = Image.fromarray(heightmap_vis)
-        heightmap_img.save(os.path.join(output_dir, "heightmap_final.png"))
-        
-        # Imagem original processada
-        original_vis = (img_array * 255).astype(np.uint8)
-        original_img = Image.fromarray(original_vis)
-        original_img.save(os.path.join(output_dir, "original_processada.png"))
-        
-        # Salvar o heightmap em cores para melhor visualização
-        plt.figure(figsize=(10, 8))
-        plt.imshow(z_map, cmap='viridis')
-        plt.colorbar(label='Profundidade (mm)')
-        plt.title('Mapa de Profundidade - Visualização Colorida')
-        plt.axis('off')
-        plt.savefig(os.path.join(output_dir, "heightmap_colorido.png"), 
-                   dpi=150, bbox_inches='tight')
-        plt.close()
-        
-        print("✅ Imagens de processo salvas!")
-    except Exception as e:
-        print(f"⚠️ Aviso: Erro ao salvar imagens: {e}")
+        print(f"Erro ao salvar comparação: {e}")
 
 def gerar_gcode_otimizado(z_map, passo, feedrate, safe_z, gcode_path, img_width, img_height):
-    """
-    Gera G-code otimizado com movimento contínuo
-    """
     try:
         with open(gcode_path, "w") as f:
-            # CABEÇALHO
             f.write("(G-code para Relevo 3D - Gerado com IA)\n")
             f.write("G21 G90 G17 G94 G49\n")
             f.write(f"F{feedrate}\n\n")
-            
-            # POSICIONAMENTO INICIAL
             f.write(f"G0 Z{safe_z:.3f}\n")
             f.write("G0 X0 Y0\n\n")
             
             linhas, colunas = z_map.shape
-            f.write(f"; Dimensões: {colunas}x{linhas} pontos\n")
-            f.write(f"; Área usinagem: {img_width * passo:.1f}x{img_height * passo:.1f}mm\n\n")
             
-            # ESTRATÉGIA DE CORTE INTELIGENTE
             for y in range(linhas):
-                # Direção zig-zag
                 if y % 2 == 0:
                     x_range = range(colunas)
                 else:
@@ -249,241 +141,273 @@ def gerar_gcode_otimizado(z_map, passo, feedrate, safe_z, gcode_path, img_width,
                 
                 for x in x_range:
                     z = z_map[y, x]
-                    pos_x = (x * passo) - (img_width * passo / 2)  # Centralizado
-                    pos_y = (y * passo) - (img_height * passo / 2) # Centralizado
+                    pos_x = (x * passo) - (img_width * passo / 2)
+                    pos_y = (y * passo) - (img_height * passo / 2)
                     
                     if primeiro_ponto:
-                        # Move para primeiro ponto com Safe Z
                         f.write(f"G0 X{pos_x:.3f} Y{pos_y:.3f}\n")
                         f.write(f"G1 Z{z:.3f}\n")
                         primeiro_ponto = False
                     else:
-                        # Movimento de corte contínuo
                         f.write(f"G1 X{pos_x:.3f} Y{pos_y:.3f} Z{z:.3f}\n")
             
-            # FINALIZAÇÃO
             f.write(f"\nG0 Z{safe_z:.3f}\n")
             f.write("G0 X0 Y0\n")
             f.write("M30\n")
         
-        print("✅ G-code gerado com sucesso!")
         return True
     except Exception as e:
-        print(f"❌ Erro ao gerar G-code: {e}")
+        print(f"Erro ao gerar G-code: {e}")
         return False
 
 # ==============================================
-# FUNÇÃO PRINCIPAL COMPLETAMENTE REPROJETADA
+# INTERFACE MODERNA E BONITA
 # ==============================================
 
-def processar_imagem_ia(img_path, largura_mm, altura_mm, profundidade_max, passo, feedrate, safe_z, uso_ia=True, tipo_relevo="baixo", metodo_processamento="preservar_detalhes"):
-    """
-    Função principal COMPLETAMENTE REPROJETADA para máxima fidelidade visual
-    """
-    try:
-        # Criar diretório de saída
-        output_dir = os.path.join(os.getcwd(), "Imagens_Processadas_IA")
-        os.makedirs(output_dir, exist_ok=True)
-
-        print("📁 CARREGANDO IMAGEM ORIGINAL...")
-        # Abrir imagem ORIGINAL - MÍNIMO de processamento
-        img_original = Image.open(img_path).convert("L")
-        
-        # CONVERTER para array numpy PRESERVANDO valores originais
-        img_array_original = np.array(img_original) / 255.0
-        
-        print("🎯 CALCULANDO DIMENSÕES...")
-        # Calcular dimensões mantendo proporção EXATA da original
-        img_ratio = img_original.width / img_original.height
-        target_ratio = largura_mm / altura_mm
-        
-        if img_ratio > target_ratio:
-            new_width = int(largura_mm / passo)
-            new_height = int(new_width / img_ratio)
-        else:
-            new_height = int(altura_mm / passo)
-            new_width = int(new_height * img_ratio)
-        
-        print(f"📐 REDIMENSIONANDO: {img_original.size} -> {new_width}x{new_height}")
-        # Redimensionar com alta qualidade
-        img_resized = img_original.resize((new_width, new_height), Image.LANCZOS)
-        img_array = np.array(img_resized) / 255.0
-
-        print("🔄 PROCESSANDO RELEVO 3D...")
-        # PROCESSAMENTO INTELIGENTE
-        ai_processor = AICNCProcessor()
-        
-        if uso_ia:
-            print(f"🤖 USANDO MÉTODO: {metodo_processamento}")
-            z_map = ai_processor.processar_imagem_inteligente(
-                img_array, profundidade_max, metodo_processamento
-            )
-        else:
-            print("🔧 USANDO MÉTODO TRADICIONAL")
-            # Método tradicional DIRETO
-            if tipo_relevo == "baixo":
-                z_map = (1 - img_array) * profundidade_max
-            else:
-                z_map = img_array * profundidade_max
-        
-        # GARANTIR qualidade do resultado
-        z_map = np.clip(z_map, 0, profundidade_max)
-        
-        # Salvar COMPARAÇÃO VISUAL detalhada
-        salvar_comparacao_visual(img_array, z_map, output_dir)
-        salvar_imagens_processo(img_array, z_map, output_dir, uso_ia)
-
-        print("⚡ GERANDO G-CODE...")
-        gcode_path = os.path.join(output_dir, "relevo_3d_fiel.nc")
-        success = gerar_gcode_otimizado(z_map, passo, feedrate, safe_z, gcode_path, new_width, new_height)
-
-        if success:
-            print("🎉 PROCESSAMENTO CONCLUÍDO COM SUCESSO!")
-            print(f"📊 Estatísticas finais:")
-            print(f"   - Profundidade mínima: {z_map.min():.2f}mm")
-            print(f"   - Profundidade máxima: {z_map.max():.2f}mm") 
-            print(f"   - Dimensões: {new_width}x{new_height} pontos")
-            return gcode_path, output_dir
-        else:
-            return None, None
-
-    except Exception as e:
-        print(f"❌ ERRO NO PROCESSAMENTO: {str(e)}")
-        messagebox.showerror("Erro", f"Erro no processamento: {str(e)}")
-        return None, None
-
-# ==============================================
-# INTERFACE ATUALIZADA COM NOVAS OPÇÕES
-# ==============================================
-
-class GeradorCNCIA:
+class ModernCNCApp:
     def __init__(self, root):
         self.root = root
         self.setup_ui()
         
     def setup_ui(self):
-        self.root.title("Gerador de G-code CNC - FIDELIDADE VISUAL")
-        self.root.geometry("750x800")
+        self.root.title("🎨 CNC Studio Pro - Gerador de Relevo 3D")
+        self.root.geometry("900x750")
+        self.root.configure(bg='#2C3E50')
         self.root.resizable(True, True)
         
+        # Configurar estilo moderno
         self.setup_styles()
         
-        main_frame = ttk.Frame(self.root, padding=20)
-        main_frame.pack(fill="both", expand=True)
+        # Frame principal
+        main_container = tk.Frame(self.root, bg='#2C3E50', padx=20, pady=20)
+        main_container.pack(fill='both', expand=True)
         
-        # Título
-        title = ttk.Label(main_frame, text="🎨 CNC ROUTER - FIDELIDADE VISUAL GARANTIDA", 
-                         font=("Segoe UI", 16, "bold"))
-        title.grid(row=0, column=0, columnspan=2, pady=(0, 20))
+        # Header
+        self.create_header(main_container)
         
-        self.create_widgets(main_frame)
+        # Conteúdo principal com abas
+        self.create_notebook(main_container)
+        
+        # Footer
+        self.create_footer(main_container)
         
     def setup_styles(self):
         style = ttk.Style()
-        style.configure("TLabel", font=("Segoe UI", 10))
-        style.configure("TButton", font=("Segoe UI", 10, "bold"))
-        style.configure("Title.TLabel", font=("Segoe UI", 12, "bold"))
-        style.configure("Generate.TButton", font=("Segoe UI", 12, "bold"))
+        style.theme_use('clam')
         
-    def create_widgets(self, parent):
-        row = 1
+        # Configurar cores modernas
+        style.configure('Modern.TFrame', background='#34495E')
+        style.configure('Header.TLabel', background='#2C3E50', foreground='white', 
+                       font=('Segoe UI', 20, 'bold'))
+        style.configure('Section.TLabel', background='#34495E', foreground='#ECF0F1',
+                       font=('Segoe UI', 12, 'bold'))
+        style.configure('Modern.TButton', background='#3498DB', foreground='white',
+                       font=('Segoe UI', 10, 'bold'), borderwidth=0, focuscolor='none')
+        style.map('Modern.TButton', background=[('active', '#2980B9')])
+        style.configure('Accent.TButton', background='#27AE60', foreground='white',
+                       font=('Segoe UI', 12, 'bold'), borderwidth=0)
+        style.map('Accent.TButton', background=[('active', '#229954')])
+        style.configure('Modern.TCheckbutton', background='#34495E', foreground='#ECF0F1')
+        style.configure('Modern.TRadiobutton', background='#34495E', foreground='#ECF0F1')
+        style.configure('Modern.TEntry', fieldbackground='#ECF0F1', borderwidth=1)
         
-        # Imagem de entrada
-        ttk.Label(parent, text="📁 Imagem de Entrada:", style="Title.TLabel").grid(row=row, column=0, sticky="w", pady=(10,5))
-        row += 1
+    def create_header(self, parent):
+        header_frame = ttk.Frame(parent, style='Modern.TFrame')
+        header_frame.pack(fill='x', pady=(0, 20))
         
-        frame_imagem = ttk.Frame(parent)
-        frame_imagem.grid(row=row, column=0, columnspan=2, sticky="ew", pady=5)
+        title = ttk.Label(header_frame, 
+                         text="🎨 CNC STUDIO PRO", 
+                         style='Header.TLabel')
+        title.pack(pady=10)
         
-        self.entry_imagem = ttk.Entry(frame_imagem, width=60)
-        self.entry_imagem.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        ttk.Button(frame_imagem, text="Procurar", command=self.selecionar_imagem).pack(side="right")
-        row += 1
+        subtitle = ttk.Label(header_frame,
+                           text="Conversor Inteligente de Imagem para Relevo 3D",
+                           style='Section.TLabel')
+        subtitle.pack(pady=(0, 10))
         
-        # NOVO: Método de Processamento
-        ttk.Label(parent, text="🔧 Método de Processamento:", style="Title.TLabel").grid(row=row, column=0, sticky="w", pady=(20,10))
-        row += 1
+    def create_notebook(self, parent):
+        # Criar abas
+        notebook = ttk.Notebook(parent)
+        notebook.pack(fill='both', expand=True)
         
-        self.metodo_processamento = tk.StringVar(value="preservar_detalhes")
-        frame_metodo = ttk.Frame(parent)
-        frame_metodo.grid(row=row, column=0, columnspan=2, sticky="w", pady=5)
+        # Aba 1: Configurações Básicas
+        tab_basico = ttk.Frame(notebook, style='Modern.TFrame')
+        notebook.add(tab_basico, text="⚙️ Configurações")
         
-        ttk.Radiobutton(frame_metodo, text="🎯 Preservar Detalhes (Recomendado)", 
-                       variable=self.metodo_processamento, value="preservar_detalhes").pack(anchor="w")
-        ttk.Radiobutton(frame_metodo, text="🌊 Relevo Natural", 
-                       variable=self.metodo_processamento, value="relevo_natural").pack(anchor="w")
-        ttk.Radiobutton(frame_metodo, text="⚡ Tradicional Rápido", 
-                       variable=self.metodo_processamento, value="tradicional").pack(anchor="w")
-        row += 1
+        self.create_basic_tab(tab_basico)
         
-        # Configurações de IA
-        ttk.Label(parent, text="🤖 Processamento com IA:", style="Title.TLabel").grid(row=row, column=0, sticky="w", pady=(20,10))
-        row += 1
+        # Aba 2: Configurações Avançadas
+        tab_avancado = ttk.Frame(notebook, style='Modern.TFrame')
+        notebook.add(tab_avancado, text="🔧 Avançado")
         
-        self.uso_ia = tk.BooleanVar(value=True)
-        ttk.Checkbutton(parent, text="Usar processamento inteligente (Recomendado para melhor qualidade)", 
-                       variable=self.uso_ia).grid(row=row, column=0, sticky="w", pady=5)
-        row += 1
+        self.create_advanced_tab(tab_avancado)
         
-        # Tipo de relevo (apenas se IA desativada)
-        ttk.Label(parent, text="🎨 Tipo de Relevo (se IA desativada):", style="Title.TLabel").grid(row=row, column=0, sticky="w", pady=(10,5))
-        row += 1
+    def create_basic_tab(self, parent):
+        # Frame com scroll
+        canvas = tk.Canvas(parent, bg='#34495E', highlightthickness=0)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas, style='Modern.TFrame')
         
-        self.tipo_relevo = tk.StringVar(value="baixo")
-        ttk.Radiobutton(parent, text="Baixo Relevo", variable=self.tipo_relevo, value="baixo").grid(row=row, column=0, sticky="w")
-        ttk.Radiobutton(parent, text="Alto Relevo", variable=self.tipo_relevo, value="alto").grid(row=row, column=0, sticky="w")
-        row += 1
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
         
-        # Parâmetros de usinagem
-        params = [
-            ("📏 Largura (mm):", "200", "entry_largura"),
-            ("📐 Altura (mm):", "150", "entry_altura"), 
-            ("⏬ Profundidade máxima (mm):", "3", "entry_profundidade"),
+        canvas.pack(side="left", fill="both", expand=True, padx=10)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Conteúdo da aba básica
+        content_frame = scrollable_frame
+        
+        # Seção: Imagem
+        self.create_section(content_frame, "📁 Imagem de Entrada", 0)
+        self.create_file_selection(content_frame, 1)
+        
+        # Seção: Processamento
+        self.create_section(content_frame, "🔧 Método de Processamento", 2)
+        self.create_processing_options(content_frame, 3)
+        
+        # Seção: Dimensões
+        self.create_section(content_frame, "📐 Dimensões do Trabalho", 4)
+        self.create_dimension_controls(content_frame, 5)
+        
+        # Seção: Geração
+        self.create_generation_section(content_frame, 6)
+        
+    def create_advanced_tab(self, parent):
+        content_frame = ttk.Frame(parent, style='Modern.TFrame')
+        content_frame.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        # Seção: Parâmetros Avançados
+        self.create_section(content_frame, "⚙️ Parâmetros de Usinagem", 0)
+        
+        advanced_params = [
             ("🔍 Passo entre pontos (mm):", "1.0", "entry_passo"),
             ("⚡ Velocidade de avanço (mm/min):", "1200", "entry_feed"),
             ("🛡️ Safe Z (mm):", "5", "entry_safez")
         ]
         
-        for label, default, attr_name in params:
-            ttk.Label(parent, text=label, style="Title.TLabel").grid(row=row, column=0, sticky="w", pady=(15,5))
-            row += 1
+        for i, (label, default, attr_name) in enumerate(advanced_params):
+            ttk.Label(content_frame, text=label, style='Section.TLabel').grid(
+                row=1+i, column=0, sticky='w', pady=5)
             
-            entry = ttk.Entry(parent, width=20, font=("Segoe UI", 10))
+            entry = ttk.Entry(content_frame, width=15, style='Modern.TEntry')
             entry.insert(0, default)
-            entry.grid(row=row, column=0, sticky="w", pady=2, padx=(20,0))
+            entry.grid(row=1+i, column=1, sticky='w', pady=5, padx=(10,0))
             setattr(self, attr_name, entry)
-            row += 1
         
-        # Botão GERAR
-        ttk.Label(parent, text="", style="Title.TLabel").grid(row=row, column=0, pady=(20,0))
-        row += 1
+        # Seção: Tipo de Relevo
+        self.create_section(content_frame, "🎨 Tipo de Relevo", 4)
         
-        btn_gerar = ttk.Button(parent, text="🚀 GERAR G-CODE FIEL", 
-                              command=self.gerar, 
-                              style="Generate.TButton",
-                              width=20)
-        btn_gerar.grid(row=row, column=0, columnspan=2, pady=30)
-        row += 1
+        self.tipo_relevo = tk.StringVar(value="baixo")
+        relief_frame = ttk.Frame(content_frame, style='Modern.TFrame')
+        relief_frame.grid(row=5, column=0, columnspan=2, sticky='w', pady=10)
         
-        # Rodapé
-        rodape = ttk.Label(parent, 
-                          text="© 2025 - CNC Router | FIDELIDADE VISUAL GARANTIDA - Versão 3.0", 
-                          font=("Segoe UI", 8), foreground="gray")
-        rodape.grid(row=row, column=0, columnspan=2, pady=20)
+        ttk.Radiobutton(relief_frame, text="Baixo Relevo", 
+                       variable=self.tipo_relevo, value="baixo",
+                       style='Modern.TRadiobutton').pack(side='left', padx=(0, 20))
+        ttk.Radiobutton(relief_frame, text="Alto Relevo", 
+                       variable=self.tipo_relevo, value="alto",
+                       style='Modern.TRadiobutton').pack(side='left')
         
-        parent.columnconfigure(0, weight=1)
-    
+    def create_section(self, parent, title, row):
+        section_frame = ttk.Frame(parent, style='Modern.TFrame')
+        section_frame.grid(row=row, column=0, columnspan=2, sticky='ew', pady=15)
+        
+        ttk.Label(section_frame, text=title, style='Section.TLabel').pack(anchor='w')
+        
+        # Linha divisória
+        separator = ttk.Separator(section_frame, orient='horizontal')
+        separator.pack(fill='x', pady=(5, 0))
+        
+    def create_file_selection(self, parent, row):
+        file_frame = ttk.Frame(parent, style='Modern.TFrame')
+        file_frame.grid(row=row, column=0, columnspan=2, sticky='ew', pady=10)
+        
+        self.entry_imagem = ttk.Entry(file_frame, width=50, style='Modern.TEntry')
+        self.entry_imagem.pack(side='left', fill='x', expand=True, padx=(0, 10))
+        
+        ttk.Button(file_frame, text="Procurar", 
+                  command=self.selecionar_imagem,
+                  style='Modern.TButton').pack(side='right')
+        
+    def create_processing_options(self, parent, row):
+        processing_frame = ttk.Frame(parent, style='Modern.TFrame')
+        processing_frame.grid(row=row, column=0, columnspan=2, sticky='w', pady=10)
+        
+        self.metodo_processamento = tk.StringVar(value="preservar_detalhes")
+        self.uso_ia = tk.BooleanVar(value=True)
+        
+        # Checkbox IA
+        ttk.Checkbutton(processing_frame, 
+                       text="Usar processamento inteligente (Recomendado)",
+                       variable=self.uso_ia,
+                       style='Modern.TCheckbutton').pack(anchor='w', pady=5)
+        
+        # Métodos de processamento
+        methods_frame = ttk.Frame(processing_frame, style='Modern.TFrame')
+        methods_frame.pack(anchor='w', pady=10, padx=20)
+        
+        ttk.Radiobutton(methods_frame, text="🎯 Preservar Detalhes (Alta Qualidade)", 
+                       variable=self.metodo_processamento, value="preservar_detalhes",
+                       style='Modern.TRadiobutton').pack(anchor='w')
+        ttk.Radiobutton(methods_frame, text="🌊 Relevo Natural (Balanço Ideal)", 
+                       variable=self.metodo_processamento, value="relevo_natural",
+                       style='Modern.TRadiobutton').pack(anchor='w')
+        ttk.Radiobutton(methods_frame, text="⚡ Tradicional Rápido (Performance)", 
+                       variable=self.metodo_processamento, value="tradicional",
+                       style='Modern.TRadiobutton').pack(anchor='w')
+        
+    def create_dimension_controls(self, parent, row):
+        dim_frame = ttk.Frame(parent, style='Modern.TFrame')
+        dim_frame.grid(row=row, column=0, columnspan=2, sticky='w', pady=10)
+        
+        params = [
+            ("Largura (mm):", "200", "entry_largura"),
+            ("Altura (mm):", "150", "entry_altura"), 
+            ("Profundidade máxima (mm):", "3", "entry_profundidade")
+        ]
+        
+        for i, (label, default, attr_name) in enumerate(params):
+            ttk.Label(dim_frame, text=label, style='Section.TLabel').grid(
+                row=i, column=0, sticky='w', pady=5, padx=(0, 10))
+            
+            entry = ttk.Entry(dim_frame, width=10, style='Modern.TEntry')
+            entry.insert(0, default)
+            entry.grid(row=i, column=1, sticky='w', pady=5)
+            setattr(self, attr_name, entry)
+        
+    def create_generation_section(self, parent, row):
+        gen_frame = ttk.Frame(parent, style='Modern.TFrame')
+        gen_frame.grid(row=row, column=0, columnspan=2, pady=30)
+        
+        ttk.Button(gen_frame, text="🚀 GERAR RELEVO 3D", 
+                  command=self.gerar,
+                  style='Accent.TButton',
+                  width=25).pack(pady=20)
+        
+        # Status
+        self.status_label = ttk.Label(gen_frame, 
+                                     text="Pronto para processar",
+                                     style='Section.TLabel')
+        self.status_label.pack()
+        
+    def create_footer(self, parent):
+        footer_frame = ttk.Frame(parent, style='Modern.TFrame')
+        footer_frame.pack(fill='x', pady=(20, 0))
+        
+        ttk.Label(footer_frame, 
+                 text="© 2025 CNC Studio Pro | Fidelidade Visual Garantida 🎨",
+                 style='Section.TLabel').pack()
+        
     def selecionar_imagem(self):
         caminho = filedialog.askopenfilename(
-            title="Selecionar imagem para processamento",
+            title="Selecionar imagem",
             filetypes=[("Imagens", "*.png;*.jpg;*.jpeg;*.bmp;*.tiff;*.tif")]
         )
         if caminho:
             self.entry_imagem.delete(0, tk.END)
             self.entry_imagem.insert(0, caminho)
-            messagebox.showinfo("Imagem Selecionada", 
-                              f"Imagem carregada para processamento:\n{os.path.basename(caminho)}\n\n"
-                              f"O resultado 3D será uma RÉPLICA FIEL da imagem original!")
+            self.status_label.config(text=f"Imagem carregada: {os.path.basename(caminho)}")
             
     def gerar(self):
         try:
@@ -505,28 +429,72 @@ class GeradorCNCIA:
                 'metodo_processamento': self.metodo_processamento.get()
             }
 
-            # Processar imagem
-            messagebox.showinfo("Processando", 
-                              f"Processando imagem com MÁXIMA FIDELIDADE VISUAL...\n\n"
-                              f"Método: {params['metodo_processamento']}\n"
-                              f"IA: {'ATIVADA' if params['uso_ia'] else 'Desativada'}\n\n"
-                              f"O resultado será uma réplica 3D fiel da imagem original!")
+            self.status_label.config(text="Processando imagem...")
+            self.root.update()
             
-            gcode_path, output_dir = processar_imagem_ia(img_path, **params)
+            # Processar imagem (usar a função processar_imagem_ia do código anterior)
+            gcode_path, output_dir = self.processar_imagem_ia(img_path, **params)
 
             if gcode_path and output_dir:
+                self.status_label.config(text="Processamento concluído!")
                 messagebox.showinfo("Sucesso!", 
-                    f"✅ PROCESSAMENTO CONCLUÍDO!\n\n"
-                    f"🎯 FIDELIDADE VISUAL GARANTIDA\n"
+                    f"✅ Relevo 3D gerado com sucesso!\n\n"
                     f"📁 Pasta: {output_dir}\n"
-                    f"📊 Comparação: comparacao_visual_detalhada.png\n"
-                    f"⚡ G-code: {os.path.basename(gcode_path)}\n\n"
-                    f"Verifique a comparação visual gerada - o relevo 3D é uma RÉPLICA FIEL da imagem original!")
-
-        except ValueError as e:
-            messagebox.showerror("Erro", f"Valor inválido: {str(e)}")
+                    f"📊 Análise visual gerada\n"
+                    f"⚡ G-code pronto para usinagem")
+            else:
+                self.status_label.config(text="Erro no processamento")
+                
         except Exception as e:
+            self.status_label.config(text="Erro no processamento")
             messagebox.showerror("Erro", f"Falha: {str(e)}")
+
+    def processar_imagem_ia(self, img_path, **params):
+        """Função de processamento (adaptada do código anterior)"""
+        try:
+            output_dir = os.path.join(os.getcwd(), "CNC_Output")
+            os.makedirs(output_dir, exist_ok=True)
+
+            img = Image.open(img_path).convert("L")
+            img_array_original = np.array(img) / 255.0
+            
+            img_ratio = img.width / img.height
+            target_ratio = params['largura_mm'] / params['altura_mm']
+            
+            if img_ratio > target_ratio:
+                new_width = int(params['largura_mm'] / params['passo'])
+                new_height = int(new_width / img_ratio)
+            else:
+                new_height = int(params['altura_mm'] / params['passo'])
+                new_width = int(new_height * img_ratio)
+            
+            img_resized = img.resize((new_width, new_height), Image.LANCZOS)
+            img_array = np.array(img_resized) / 255.0
+
+            ai_processor = AICNCProcessor()
+            
+            if params['uso_ia']:
+                z_map = ai_processor.processar_imagem_inteligente(
+                    img_array, params['profundidade_max'], params['metodo_processamento']
+                )
+            else:
+                if params['tipo_relevo'] == "baixo":
+                    z_map = (1 - img_array) * params['profundidade_max']
+                else:
+                    z_map = img_array * params['profundidade_max']
+            
+            z_map = np.clip(z_map, 0, params['profundidade_max'])
+            salvar_comparacao_visual(img_array, z_map, output_dir)
+
+            gcode_path = os.path.join(output_dir, "relevo_3d.nc")
+            success = gerar_gcode_otimizado(z_map, params['passo'], params['feedrate'], 
+                                          params['safe_z'], gcode_path, new_width, new_height)
+
+            return gcode_path, output_dir if success else (None, None)
+
+        except Exception as e:
+            print(f"Erro: {str(e)}")
+            return None, None
 
 # ==============================================
 # EXECUÇÃO
@@ -534,6 +502,6 @@ class GeradorCNCIA:
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = GeradorCNCIA(root)
+    app = ModernCNCApp(root)
     root.mainloop()
     
