@@ -218,6 +218,60 @@ def salvar_imagens_processo(img_array, z_map, output_dir, uso_ia):
     except Exception as e:
         print(f"⚠️ Aviso: Erro ao salvar imagens: {e}")
 
+def gerar_gcode_otimizado(z_map, passo, feedrate, safe_z, gcode_path, img_width, img_height):
+    """
+    Gera G-code otimizado com movimento contínuo
+    """
+    try:
+        with open(gcode_path, "w") as f:
+            # CABEÇALHO
+            f.write("(G-code para Relevo 3D - Gerado com IA)\n")
+            f.write("G21 G90 G17 G94 G49\n")
+            f.write(f"F{feedrate}\n\n")
+            
+            # POSICIONAMENTO INICIAL
+            f.write(f"G0 Z{safe_z:.3f}\n")
+            f.write("G0 X0 Y0\n\n")
+            
+            linhas, colunas = z_map.shape
+            f.write(f"; Dimensões: {colunas}x{linhas} pontos\n")
+            f.write(f"; Área usinagem: {img_width * passo:.1f}x{img_height * passo:.1f}mm\n\n")
+            
+            # ESTRATÉGIA DE CORTE INTELIGENTE
+            for y in range(linhas):
+                # Direção zig-zag
+                if y % 2 == 0:
+                    x_range = range(colunas)
+                else:
+                    x_range = range(colunas - 1, -1, -1)
+                
+                primeiro_ponto = True
+                
+                for x in x_range:
+                    z = z_map[y, x]
+                    pos_x = (x * passo) - (img_width * passo / 2)  # Centralizado
+                    pos_y = (y * passo) - (img_height * passo / 2) # Centralizado
+                    
+                    if primeiro_ponto:
+                        # Move para primeiro ponto com Safe Z
+                        f.write(f"G0 X{pos_x:.3f} Y{pos_y:.3f}\n")
+                        f.write(f"G1 Z{z:.3f}\n")
+                        primeiro_ponto = False
+                    else:
+                        # Movimento de corte contínuo
+                        f.write(f"G1 X{pos_x:.3f} Y{pos_y:.3f} Z{z:.3f}\n")
+            
+            # FINALIZAÇÃO
+            f.write(f"\nG0 Z{safe_z:.3f}\n")
+            f.write("G0 X0 Y0\n")
+            f.write("M30\n")
+        
+        print("✅ G-code gerado com sucesso!")
+        return True
+    except Exception as e:
+        print(f"❌ Erro ao gerar G-code: {e}")
+        return False
+
 # ==============================================
 # FUNÇÃO PRINCIPAL COMPLETAMENTE REPROJETADA
 # ==============================================
@@ -356,7 +410,7 @@ class GeradorCNCIA:
         
         ttk.Radiobutton(frame_metodo, text="🎯 Preservar Detalhes (Recomendado)", 
                        variable=self.metodo_processamento, value="preservar_detalhes").pack(anchor="w")
-        ttk.Radiobutton(frame_metago, text="🌊 Relevo Natural", 
+        ttk.Radiobutton(frame_metodo, text="🌊 Relevo Natural", 
                        variable=self.metodo_processamento, value="relevo_natural").pack(anchor="w")
         ttk.Radiobutton(frame_metodo, text="⚡ Tradicional Rápido", 
                        variable=self.metodo_processamento, value="tradicional").pack(anchor="w")
