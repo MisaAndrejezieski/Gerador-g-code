@@ -5,482 +5,412 @@ from PIL import Image, ImageOps, ImageFilter, ImageEnhance
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+from scipy import ndimage
 
 # ==============================================
-# CLASSE DE IA CORRIGIDA - SEM VALORES NaN
+# CLASSE IA ESPECIALIZADA PARA MADEIRA
 # ==============================================
 
-class AICNCProcessor:
+class WoodCarvingAI:
     def __init__(self):
-        pass
+        self.wood_grain_cache = {}
         
-    def processar_imagem_inteligente(self, image_array, profundidade_max, tipo_processamento="preservar_detalhes"):
+    def processar_para_madeira(self, image_array, profundidade_max, tipo_madeira="medium", direcao_veio="horizontal"):
         """
-        Processamento inteligente SEM valores NaN
-        """
-        try:
-            # GARANTIR que não há valores NaN na entrada
-            image_array = np.nan_to_num(image_array, nan=0.5, posinf=1.0, neginf=0.0)
-            image_array = np.clip(image_array, 0.001, 0.999)
-            
-            if tipo_processamento == "preservar_detalhes":
-                return self._processar_preservando_detalhes(image_array, profundidade_max)
-            elif tipo_processamento == "relevo_natural":
-                return self._processar_relevo_natural(image_array, profundidade_max)
-            else:
-                return self._processar_tradicional(image_array, profundidade_max)
-                
-        except Exception as e:
-            print(f"Erro no processamento IA: {e}")
-            return self._processar_tradicional(image_array, profundidade_max)
-
-    def _processar_preservando_detalhes(self, image_array, profundidade_max):
-        """
-        Técnica avançada SEM valores NaN
+        Processamento OTIMIZADO para entalhe em madeira
         """
         try:
             # Garantir dados válidos
-            image_array = np.nan_to_num(image_array, nan=0.5)
-            image_array = np.clip(image_array, 0.001, 0.999)
+            image_array = self._preprocessar_imagem(image_array)
             
-            img_suavizada = cv2.GaussianBlur(image_array, (3, 3), 0.8)
-            img_suavizada = np.clip(img_suavizada, 0.001, 0.999)
-            
-            kernel_aguçamento = np.array([[-1, -1, -1],
-                                        [-1,  9, -1],
-                                        [-1, -1, -1]])
-            img_detalhada = cv2.filter2D(img_suavizada, -1, kernel_aguçamento)
-            img_detalhada = np.clip(img_detalhada, 0.001, 0.999)
-            
-            # Mapeamento seguro SEM NaN
-            z_map = (1 - img_detalhada) * profundidade_max
-            
-            # Aplicar curva gamma com proteção
-            gamma = 0.8
-            z_map_normalized = np.clip(z_map / profundidade_max, 0.001, 0.999)
-            z_map = np.power(z_map_normalized, gamma) * profundidade_max
-            
-            # Garantir saída válida
-            z_map = np.nan_to_num(z_map, nan=0.0)
-            z_map = np.clip(z_map, 0.0, profundidade_max)
-            
-            print(f"✅ Processamento 'Preservar Detalhes' - Profundidades: {z_map.min():.3f} a {z_map.max():.3f} mm")
-            return z_map
-            
+            # Aplicar filtros específicos para madeira
+            if tipo_madeira == "soft":  # Madeiras macias (Pinho, Cedro)
+                return self._processar_madeira_macia(image_array, profundidade_max, direcao_veio)
+            elif tipo_madeira == "hard":  # Madeiras duras (Carvalho, Mogno)
+                return self._processar_madeira_dura(image_array, profundidade_max, direcao_veio)
+            else:  # Medium (Nogueira, Cerejeira)
+                return self._processar_madeira_media(image_array, profundidade_max, direcao_veio)
+                
         except Exception as e:
-            print(f"Erro em preservar detalhes: {e}")
+            print(f"Erro no processamento para madeira: {e}")
             return self._processar_tradicional(image_array, profundidade_max)
 
-    def _processar_relevo_natural(self, image_array, profundidade_max):
+    def _processar_madeira_macia(self, image_array, profundidade_max, direcao_veio):
+        """
+        Para madeiras macias - cortes mais suaves, menos detalhes finos
+        """
+        # Suavização mais agressiva
+        img_suavizada = cv2.GaussianBlur(image_array, (5, 5), 1.2)
+        
+        # Realçar contornos médios (evitar detalhes muito finos)
+        edges = cv2.Canny((img_suavizada * 255).astype(np.uint8), 50, 150) / 255.0
+        
+        # Combinar com imagem suavizada
+        z_map = (1 - img_suavizada) * profundidade_max * 0.7 + edges * profundidade_max * 0.3
+        
+        # Aplicar veio da madeira
+        z_map = self._aplicar_efeito_veio(z_map, direcao_veio, intensidade=0.1)
+        
+        return np.clip(z_map, 0, profundidade_max)
+
+    def _processar_madeira_dura(self, image_array, profundidade_max, direcao_veio):
+        """
+        Para madeiras duras - permite mais detalhes e definição
+        """
+        # Suavização leve
+        img_suavizada = cv2.GaussianBlur(image_array, (3, 3), 0.8)
+        
+        # Realçar detalhes finos
+        kernel_aguçamento = np.array([[-1, -1, -1],
+                                    [-1,  9, -1],
+                                    [-1, -1, -1]])
+        img_detalhada = cv2.filter2D(img_suavizada, -1, kernel_aguçamento)
+        
+        # Detecção de bordas para detalhes
+        edges = cv2.Canny((img_detalhada * 255).astype(np.uint8), 70, 180) / 255.0
+        
+        # Mapeamento mais agressivo para detalhes
+        z_map = (1 - img_detalhada) * profundidade_max * 0.6 + edges * profundidade_max * 0.4
+        
+        # Efeito de veio mais sutil
+        z_map = self._aplicar_efeito_veio(z_map, direcao_veio, intensidade=0.05)
+        
+        return np.clip(z_map, 0, profundidade_max)
+
+    def _processar_madeira_media(self, image_array, profundidade_max, direcao_veio):
+        """
+        Para madeiras de densidade média - equilíbrio entre detalhe e suavidade
+        """
+        # Suavização moderada
+        img_suavizada = cv2.GaussianBlur(image_array, (3, 3), 1.0)
+        
+        # Aguçamento moderado
+        kernel_aguçamento = np.array([[0, -0.5, 0],
+                                    [-0.5, 3, -0.5],
+                                    [0, -0.5, 0]])
+        img_aprimorada = cv2.filter2D(img_suavizada, -1, kernel_aguçamento)
+        
+        # Mapeamento balanceado
+        z_map = (1 - img_aprimorada) * profundidade_max
+        
+        # Curva gamma para melhor distribuição
+        gamma = 0.7
+        z_map_normalized = np.clip(z_map / profundidade_max, 0.001, 0.999)
+        z_map = np.power(z_map_normalized, gamma) * profundidade_max
+        
+        # Efeito de veio
+        z_map = self._aplicar_efeito_veio(z_map, direcao_veio, intensidade=0.08)
+        
+        return np.clip(z_map, 0, profundidade_max)
+
+    def _aplicar_efeito_veio(self, z_map, direcao, intensidade=0.1):
+        """
+        Adiciona efeito de veio da madeira ao mapa de profundidade
+        """
         try:
-            image_array = np.nan_to_num(image_array, nan=0.5)
-            image_array = np.clip(image_array, 0.001, 0.999)
+            rows, cols = z_map.shape
             
-            img_contraste = np.power(image_array, 0.7)
-            img_contraste = np.clip(img_contraste, 0.001, 0.999)
+            # Criar padrão de veio
+            if direcao == "horizontal":
+                veio = np.sin(np.linspace(0, 4*np.pi, cols))
+                veio = np.tile(veio, (rows, 1))
+            elif direcao == "vertical":
+                veio = np.sin(np.linspace(0, 4*np.pi, rows))
+                veio = np.tile(veio.reshape(-1, 1), (1, cols))
+            else:  # diagonal
+                x = np.linspace(0, 4*np.pi, cols)
+                y = np.linspace(0, 4*np.pi, rows)
+                X, Y = np.meshgrid(x, y)
+                veio = np.sin(X + Y)
             
-            z_map = self._mapeamento_perceptivo(img_contraste, profundidade_max)
-            z_map = cv2.bilateralFilter(z_map.astype(np.float32), 7, 30, 30)
+            # Aplicar veio com intensidade controlada
+            z_map_com_veio = z_map * (1 + veio * intensidade * 0.5)
             
-            z_map = np.nan_to_num(z_map, nan=0.0)
-            z_map = np.clip(z_map, 0.0, profundidade_max)
+            return np.clip(z_map_com_veio, z_map.min(), z_map.max())
             
-            print(f"✅ Processamento 'Relevo Natural' - Profundidades: {z_map.min():.3f} a {z_map.max():.3f} mm")
+        except:
             return z_map
-            
-        except Exception as e:
-            print(f"Erro em relevo natural: {e}")
-            return self._processar_tradicional(image_array, profundidade_max)
+
+    def _preprocessar_imagem(self, image_array):
+        """Pré-processamento robusto"""
+        image_array = np.nan_to_num(image_array, nan=0.5)
+        image_array = np.clip(image_array, 0.001, 0.999)
+        return image_array
 
     def _processar_tradicional(self, image_array, profundidade_max):
+        """Fallback seguro"""
+        image_array = self._preprocessar_imagem(image_array)
+        z_map = (1 - image_array) * profundidade_max
+        return np.clip(z_map, 0, profundidade_max)
+
+# ==============================================
+# GERADOR G-CODE PARA MADEIRA
+# ==============================================
+
+class WoodGCodeGenerator:
+    def __init__(self):
+        self.wood_configs = {
+            "soft": {"feedrate": 2000, "stepover": 0.8, "depth_increment": 0.5},
+            "medium": {"feedrate": 1500, "stepover": 0.6, "depth_increment": 0.3},
+            "hard": {"feedrate": 1000, "stepover": 0.4, "depth_increment": 0.2}
+        }
+    
+    def gerar_gcode_madeira(self, z_map, params):
+        """
+        Gera G-code otimizado para entalhe em madeira
+        """
         try:
-            image_array = np.nan_to_num(image_array, nan=0.5)
-            image_array = np.clip(image_array, 0.001, 0.999)
+            gcode_path = params['output_path']
+            wood_type = params.get('wood_type', 'medium')
+            config = self.wood_configs[wood_type]
             
-            z_map = (1 - image_array) * profundidade_max
-            z_map = cv2.GaussianBlur(z_map, (2, 2), 0.5)
+            with open(gcode_path, "w", encoding='utf-8') as f:
+                # CABEÇALHO ESPECÍFICO PARA MADEIRA
+                f.write("(G-code para Entalhe em Madeira - Gerado com IA)\n")
+                f.write("(OTIMIZADO PARA USINAGEM EM MADEIRA)\n")
+                f.write("G21 G90 G17 G94 G49 G40\n")
+                f.write(f"F{config['feedrate']}\n")
+                f.write("S10000 (RPM SPINDLE)\n\n")
+                
+                # POSICIONAMENTO SEGURO
+                f.write(f"G0 Z{params['safe_z']:.3f}\n")
+                f.write("G0 X0 Y0\n")
+                f.write("M3 (LIGAR SPINDLE)\n")
+                f.write("G4 P2 (AGUARDAR SPINDLE)\n\n")
+                
+                # GERAR PERCURSO OTIMIZADO
+                self._gerar_percurso_madeira(f, z_map, params, config)
+                
+                # FINALIZAÇÃO
+                f.write(f"\nG0 Z{params['safe_z']:.3f}\n")
+                f.write("M5 (DESLIGAR SPINDLE)\n")
+                f.write("G0 X0 Y0\n")
+                f.write("M30\n\n")
+                
+                # ESTATÍSTICAS
+                f.write("; === ESTATÍSTICAS MADEIRA ===\n")
+                f.write(f"; Tipo: {wood_type.upper()}\n")
+                f.write(f"; Velocidade: {config['feedrate']} mm/min\n")
+                f.write(f"; RPM: 10000\n")
+                f.write(f"; Dimensões: {z_map.shape[1]}x{z_map.shape[0]} pontos\n")
             
-            z_map = np.nan_to_num(z_map, nan=0.0)
-            z_map = np.clip(z_map, 0.0, profundidade_max)
-            
-            print(f"✅ Processamento 'Tradicional' - Profundidades: {z_map.min():.3f} a {z_map.max():.3f} mm")
-            return z_map
+            print(f"✅ G-code para madeira {wood_type} gerado: {gcode_path}")
+            return True
             
         except Exception as e:
-            print(f"Erro em tradicional: {e}")
-            # Último recurso - retornar array seguro
-            safe_array = np.full_like(image_array, profundidade_max / 2)
-            return safe_array
+            print(f"❌ Erro ao gerar G-code madeira: {e}")
+            return False
 
-    def _mapeamento_perceptivo(self, image_array, profundidade_max):
-        try:
-            media = np.mean(image_array)
-            desvio = np.std(image_array)
-            
-            z_map = np.zeros_like(image_array)
-            mascara_escuro = image_array < (media - desvio/2)
-            mascara_claro = image_array > (media + desvio/2)
-            mascara_medio = ~(mascara_escuro | mascara_claro)
-            
-            z_map[mascara_escuro] = profundidade_max * 0.9
-            z_map[mascara_claro] = profundidade_max * 0.1
-            
-            if np.any(mascara_medio):
-                intensidades_medio = image_array[mascara_medio]
-                z_map[mascara_medio] = (1 - intensidades_medio) * profundidade_max * 0.8 + profundidade_max * 0.1
-            
-            return z_map
-        except:
-            return (1 - image_array) * profundidade_max
-
-# ==============================================
-# FUNÇÕES AUXILIARES CORRIGIDAS
-# ==============================================
-
-def salvar_comparacao_visual(img_original, z_map_final, output_dir):
-    try:
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    def _gerar_percurso_madeira(self, f, z_map, params, config):
+        """Gera percurso otimizado para madeira"""
+        rows, cols = z_map.shape
+        passo = params['passo']
+        safe_z = params['safe_z']
         
-        axes[0].imshow(img_original, cmap='gray')
-        axes[0].set_title('IMAGEM ORIGINAL')
-        axes[0].axis('off')
+        # ESTRATÉGIA: Varredura em múltiplas passes para madeira dura
+        max_depth = np.max(z_map)
+        if params.get('wood_type') == 'hard' and max_depth > 2:
+            num_passes = max(2, int(max_depth / config['depth_increment']))
+        else:
+            num_passes = 1
         
-        im2 = axes[1].imshow(z_map_final, cmap='viridis')
-        axes[1].set_title('MAPA DE PROFUNDIDADE')
-        axes[1].axis('off')
-        plt.colorbar(im2, ax=axes[1])
-        
-        img_rgb = np.stack([img_original] * 3, axis=-1)
-        depth_normalized = z_map_final / z_map_final.max() if z_map_final.max() > 0 else z_map_final
-        heatmap = plt.cm.viridis(depth_normalized)
-        alpha = 0.6
-        sobreposicao = img_rgb * (1 - alpha) + heatmap[:, :, :3] * alpha
-        
-        axes[2].imshow(sobreposicao)
-        axes[2].set_title('SOBREPOSIÇÃO')
-        axes[2].axis('off')
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, 'comparacao_visual.png'), 
-                   dpi=150, bbox_inches='tight')
-        plt.close()
-        
-    except Exception as e:
-        print(f"Erro ao salvar comparação: {e}")
-
-def gerar_gcode_otimizado(z_map, passo, feedrate, safe_z, gcode_path, img_width, img_height):
-    """
-    Gera G-code SEM valores NaN - CORREÇÃO CRÍTICA
-    """
-    try:
-        with open(gcode_path, "w") as f:
-            # CABEÇALHO
-            f.write("(G-code para Relevo 3D - Gerado com IA)\n")
-            f.write("G21 G90 G17 G94 G49\n")
-            f.write(f"F{feedrate}\n\n")
-            f.write(f"G0 Z{safe_z:.3f}\n")
-            f.write("G0 X0 Y0\n\n")
+        for pass_num in range(num_passes):
+            if num_passes > 1:
+                f.write(f"\n(PASSE {pass_num + 1} de {num_passes})\n")
             
-            linhas, colunas = z_map.shape
+            depth_factor = (pass_num + 1) / num_passes
             
-            # CONTADOR para debug
-            pontos_validos = 0
-            pontos_invalidos = 0
-            
-            for y in range(linhas):
+            for y in range(rows):
+                # Alternar direção (zig-zag)
                 if y % 2 == 0:
-                    x_range = range(colunas)
+                    x_range = range(cols)
                 else:
-                    x_range = range(colunas - 1, -1, -1)
+                    x_range = range(cols - 1, -1, -1)
                 
                 primeiro_ponto = True
                 
                 for x in x_range:
-                    z = z_map[y, x]
+                    z_original = z_map[y, x]
                     
-                    # VERIFICAÇÃO CRÍTICA - GARANTIR que Z é um número válido
-                    if np.isnan(z) or np.isinf(z):
-                        pontos_invalidos += 1
-                        z = 0.0  # Valor seguro padrão
+                    # Para múltiplos passes, calcular profundidade deste passe
+                    if num_passes > 1:
+                        z_target = z_original * depth_factor
                     else:
-                        pontos_validos += 1
-                        z = max(0.0, min(z, 10.0))  # Limitar entre 0 e 10mm
+                        z_target = z_original
                     
-                    pos_x = (x * passo) - (img_width * passo / 2)
-                    pos_y = (y * passo) - (img_height * passo / 2)
+                    # VALIDAÇÃO CRÍTICA
+                    if np.isnan(z_target) or np.isinf(z_target):
+                        z_target = 0.0
+                    else:
+                        z_target = max(0.0, min(z_target, params['profundidade_max']))
+                    
+                    pos_x = (x * passo) - (cols * passo / 2)
+                    pos_y = (y * passo) - (rows * passo / 2)
                     
                     if primeiro_ponto:
                         f.write(f"G0 X{pos_x:.3f} Y{pos_y:.3f}\n")
-                        f.write(f"G1 Z{z:.3f}\n")
+                        f.write(f"G1 Z{z_target:.3f}\n")
                         primeiro_ponto = False
                     else:
-                        f.write(f"G1 X{pos_x:.3f} Y{pos_y:.3f} Z{z:.3f}\n")
-            
-            # FINALIZAÇÃO
-            f.write(f"\nG0 Z{safe_z:.3f}\n")
-            f.write("G0 X0 Y0\n")
-            f.write("M30\n")
-            
-            # ESTATÍSTICAS
-            f.write(f"\n; === ESTATÍSTICAS ===\n")
-            f.write(f"; Pontos válidos: {pontos_validos}\n")
-            f.write(f"; Pontos corrigidos: {pontos_invalidos}\n")
-            f.write(f"; Dimensões: {colunas}x{linhas}\n")
-        
-        print(f"✅ G-code gerado: {pontos_validos} pontos válidos, {pontos_invalidos} corrigidos")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Erro crítico ao gerar G-code: {e}")
-        return False
+                        f.write(f"G1 X{pos_x:.3f} Y{pos_y:.3f} Z{z_target:.3f}\n")
 
 # ==============================================
-# INTERFACE MODERNA COMPACTA
+# INTERFACE MODERNA PARA MADEIRA
 # ==============================================
 
-class ModernCNCApp:
+class WoodCarvingApp:
     def __init__(self, root):
         self.root = root
+        self.wood_ai = WoodCarvingAI()
+        self.gcode_gen = WoodGCodeGenerator()
         self.setup_ui()
         
     def setup_ui(self):
-        self.root.title("🎨 CNC Studio Pro")
-        self.root.geometry("800x680")  # Tela mais compacta
-        self.root.configure(bg='#2C3E50')
+        self.root.title("🪵 Wood Carving Studio Pro")
+        self.root.geometry("900x750")
+        self.root.configure(bg='#8B4513')  # Fundo marrom madeira
         self.root.resizable(True, True)
         
         self.setup_styles()
-        
-        # Container principal
-        main_container = tk.Frame(self.root, bg='#2C3E50')
-        main_container.pack(fill='both', expand=True, padx=15, pady=15)
-        
-        # Header COMPACTO
-        self.create_compact_header(main_container)
-        
-        # Área de conteúdo principal
-        self.create_content_area(main_container)
+        self.create_main_interface()
         
     def setup_styles(self):
         style = ttk.Style()
         style.theme_use('clam')
         
-        # Configurações modernas e compactas
-        style.configure('Modern.TFrame', background='#34495E')
-        style.configure('CompactHeader.TLabel', background='#2C3E50', foreground='white', 
+        # Cores de madeira
+        style.configure('Wood.TFrame', background='#DEB887')
+        style.configure('Wood.TLabel', background='#DEB887', foreground='#8B4513', font=('Segoe UI', 10))
+        style.configure('WoodTitle.TLabel', background='#DEB887', foreground='#654321', 
                        font=('Segoe UI', 16, 'bold'))
-        style.configure('Subtitle.TLabel', background='#2C3E50', foreground='#BDC3C7',
-                       font=('Segoe UI', 9))
-        style.configure('Section.TLabel', background='#34495E', foreground='#ECF0F1',
-                       font=('Segoe UI', 10, 'bold'))
-        style.configure('Modern.TButton', background='#3498DB', foreground='white',
+        style.configure('Wood.TButton', background='#A0522D', foreground='white',
                        font=('Segoe UI', 9, 'bold'))
-        style.map('Modern.TButton', background=[('active', '#2980B9')])
-        style.configure('Accent.TButton', background='#27AE60', foreground='white',
-                       font=('Segoe UI', 11, 'bold'))
-        style.map('Accent.TButton', background=[('active', '#229954')])
-        style.configure('Modern.TCheckbutton', background='#34495E', foreground='#ECF0F1')
-        style.configure('Modern.TRadiobutton', background='#34495E', foreground='#ECF0F1')
-        style.configure('Modern.TEntry', fieldbackground='#ECF0F1')
+        style.map('Wood.TButton', background=[('active', '#8B4513')])
         
-    def create_compact_header(self, parent):
-        """Header muito mais compacto"""
-        header_frame = ttk.Frame(parent, style='Modern.TFrame')
-        header_frame.pack(fill='x', pady=(0, 15))
+    def create_main_interface(self):
+        # Frame principal
+        main_frame = ttk.Frame(self.root, style='Wood.TFrame')
+        main_frame.pack(fill='both', expand=True, padx=20, pady=20)
         
-        # Título principal compacto
-        title = ttk.Label(header_frame, 
-                         text="🎨 CNC Studio Pro", 
-                         style='CompactHeader.TLabel')
-        title.pack(pady=(5, 0))
+        # Título
+        title = ttk.Label(main_frame, text="🪵 Wood Carving Studio Pro", style='WoodTitle.TLabel')
+        title.pack(pady=(0, 20))
         
-        # Subtítulo menor
-        subtitle = ttk.Label(header_frame,
-                           text="Conversor de Imagem para Relevo 3D",
-                           style='Subtitle.TLabel')
-        subtitle.pack(pady=(0, 5))
-        
-    def create_content_area(self, parent):
-        """Área de conteúdo principal com abas"""
-        notebook = ttk.Notebook(parent)
+        # Abas
+        notebook = ttk.Notebook(main_frame)
         notebook.pack(fill='both', expand=True)
         
         # Aba Principal
-        tab_principal = ttk.Frame(notebook, style='Modern.TFrame')
-        notebook.add(tab_principal, text="⚙️ Principal")
-        self.create_main_tab(tab_principal)
+        tab_principal = ttk.Frame(notebook, style='Wood.TFrame')
+        notebook.add(tab_principal, text="⚙️ Configurações")
         
-        # Aba Avançado
-        tab_avancado = ttk.Frame(notebook, style='Modern.TFrame')
-        notebook.add(tab_avancado, text="🔧 Avançado")
-        self.create_advanced_tab(tab_avancado)
+        # Aba Madeira
+        tab_madeira = ttk.Frame(notebook, style='Wood.TFrame')
+        notebook.add(tab_madeira, text="🪵 Tipo de Madeira")
         
-    def create_main_tab(self, parent):
-        """Aba principal compacta"""
-        # Frame com scroll para conteúdo
-        canvas = tk.Canvas(parent, bg='#34495E', highlightthickness=0, height=500)
-        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas, style='Modern.TFrame')
+        self.create_wood_settings_tab(tab_madeira)
+        self.create_main_settings_tab(tab_principal)
         
-        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+    def create_wood_settings_tab(self, parent):
+        """Aba específica para configurações de madeira"""
+        # Tipo de Madeira
+        ttk.Label(parent, text="Selecione o Tipo de Madeira:", style='Wood.TLabel').pack(anchor='w', pady=(10,5))
         
-        canvas.pack(side="left", fill="both", expand=True, padx=5)
-        scrollbar.pack(side="right", fill="y")
+        self.tipo_madeira = tk.StringVar(value="medium")
         
-        # Conteúdo da aba principal
-        content = scrollable_frame
+        wood_frame = ttk.Frame(parent, style='Wood.TFrame')
+        wood_frame.pack(fill='x', pady=5)
         
-        # Seção: Imagem
-        self.create_section(content, "📁 Imagem de Entrada", 0)
-        self.create_file_section(content, 1)
+        ttk.Radiobutton(wood_frame, text="🔸 Macia (Pinho, Cedro)", 
+                       variable=self.tipo_madeira, value="soft", style='Wood.TLabel').pack(side='left', padx=10)
+        ttk.Radiobutton(wood_frame, text="🔸 Média (Nogueira, Cerejeira)", 
+                       variable=self.tipo_madeira, value="medium", style='Wood.TLabel').pack(side='left', padx=10)
+        ttk.Radiobutton(wood_frame, text="🔸 Dura (Carvalho, Mogno)", 
+                       variable=self.tipo_madeira, value="hard", style='Wood.TLabel').pack(side='left', padx=10)
         
-        # Seção: Processamento
-        self.create_section(content, "🔧 Processamento", 2)
-        self.create_processing_section(content, 3)
+        # Direção do Veio
+        ttk.Label(parent, text="Direção do Veio:", style='Wood.TLabel').pack(anchor='w', pady=(15,5))
         
-        # Seção: Dimensões
-        self.create_section(content, "📐 Dimensões", 4)
-        self.create_dimension_section(content, 5)
+        self.direcao_veio = tk.StringVar(value="horizontal")
+        
+        grain_frame = ttk.Frame(parent, style='Wood.TFrame')
+        grain_frame.pack(fill='x', pady=5)
+        
+        ttk.Radiobutton(grain_frame, text="➡️ Horizontal", 
+                       variable=self.direcao_veio, value="horizontal", style='Wood.TLabel').pack(side='left', padx=10)
+        ttk.Radiobutton(grain_frame, text="⬇️ Vertical", 
+                       variable=self.direcao_veio, value="vertical", style='Wood.TLabel').pack(side='left', padx=10)
+        ttk.Radiobutton(grain_frame, text="↘️ Diagonal", 
+                       variable=self.direcao_veio, value="diagonal", style='Wood.TLabel').pack(side='left', padx=10)
+        
+        # Dicas para cada tipo de madeira
+        tips_frame = ttk.Frame(parent, style='Wood.TFrame')
+        tips_frame.pack(fill='x', pady=15)
+        
+        tips_text = """
+        💡 DICAS PARA ENTALHE:
+        
+        • MACIA: Ideal para peças grandes, menos detalhadas
+        • MÉDIA: Equilíbrio entre detalhe e facilidade de usinagem  
+        • DURA: Para peças pequenas e altamente detalhadas
+        • Use ferramentas afiadas e refrigerante para madeiras duras
+        """
+        
+        tips_label = ttk.Label(tips_frame, text=tips_text, style='Wood.TLabel', justify='left')
+        tips_label.pack(anchor='w')
+        
+    def create_main_settings_tab(self, parent):
+        """Aba principal de configurações"""
+        # Seleção de arquivo
+        ttk.Label(parent, text="Imagem para Entalhe:", style='Wood.TLabel').pack(anchor='w', pady=(10,5))
+        
+        file_frame = ttk.Frame(parent, style='Wood.TFrame')
+        file_frame.pack(fill='x', pady=5)
+        
+        self.entry_imagem = ttk.Entry(file_frame, width=50)
+        self.entry_imagem.pack(side='left', fill='x', expand=True, padx=(0, 10))
+        
+        ttk.Button(file_frame, text="Procurar", command=self.selecionar_imagem, style='Wood.TButton').pack(side='right')
+        
+        # Parâmetros de usinagem
+        params_frame = ttk.Frame(parent, style='Wood.TFrame')
+        params_frame.pack(fill='x', pady=15)
+        
+        # Grid de parâmetros
+        self.entry_largura = self.create_parameter(params_frame, "Largura (mm):", "200", 0)
+        self.entry_altura = self.create_parameter(params_frame, "Altura (mm):", "150", 1)
+        self.entry_profundidade = self.create_parameter(params_frame, "Profundidade Max (mm):", "4", 2)
+        self.entry_passo = self.create_parameter(params_frame, "Passo (mm):", "1.0", 3)
         
         # Botão de geração
-        self.create_generate_section(content, 6)
-        
-    def create_file_section(self, parent, row):
-        """Seleção de arquivo compacta"""
-        file_frame = ttk.Frame(parent, style='Modern.TFrame')
-        file_frame.grid(row=row, column=0, columnspan=2, sticky='ew', pady=8)
-        
-        self.entry_imagem = ttk.Entry(file_frame, width=45, style='Modern.TEntry')
-        self.entry_imagem.pack(side='left', fill='x', expand=True, padx=(0, 8))
-        
-        ttk.Button(file_frame, text="Procurar", 
-                  command=self.selecionar_imagem,
-                  style='Modern.TButton').pack(side='right')
-        
-    def create_processing_section(self, parent, row):
-        """Opções de processamento compactas"""
-        proc_frame = ttk.Frame(parent, style='Modern.TFrame')
-        proc_frame.grid(row=row, column=0, columnspan=2, sticky='w', pady=8)
-        
-        self.metodo_processamento = tk.StringVar(value="preservar_detalhes")
-        self.uso_ia = tk.BooleanVar(value=True)
-        
-        # Checkbox IA
-        ttk.Checkbutton(proc_frame, 
-                       text="Processamento Inteligente",
-                       variable=self.uso_ia,
-                       style='Modern.TCheckbutton').pack(anchor='w', pady=2)
-        
-        # Métodos de processamento
-        methods_frame = ttk.Frame(proc_frame, style='Modern.TFrame')
-        methods_frame.pack(anchor='w', pady=5, padx=15)
-        
-        ttk.Radiobutton(methods_frame, text="🎯 Alta Qualidade", 
-                       variable=self.metodo_processamento, value="preservar_detalhes",
-                       style='Modern.TRadiobutton').pack(anchor='w')
-        ttk.Radiobutton(methods_frame, text="🌊 Natural", 
-                       variable=self.metodo_processamento, value="relevo_natural",
-                       style='Modern.TRadiobutton').pack(anchor='w')
-        ttk.Radiobutton(methods_frame, text="⚡ Rápido", 
-                       variable=self.metodo_processamento, value="tradicional",
-                       style='Modern.TRadiobutton').pack(anchor='w')
-        
-    def create_dimension_section(self, parent, row):
-        """Controles de dimensão compactos"""
-        dim_frame = ttk.Frame(parent, style='Modern.TFrame')
-        dim_frame.grid(row=row, column=0, columnspan=2, sticky='w', pady=8)
-        
-        # Layout em grid para economizar espaço
-        params = [
-            ("Largura (mm):", "200", "entry_largura", 0),
-            ("Altura (mm):", "150", "entry_altura", 1), 
-            ("Profundidade (mm):", "3", "entry_profundidade", 2)
-        ]
-        
-        for label, default, attr_name, row_idx in params:
-            ttk.Label(dim_frame, text=label, style='Section.TLabel').grid(
-                row=row_idx, column=0, sticky='w', pady=2, padx=(0, 5))
-            
-            entry = ttk.Entry(dim_frame, width=8, style='Modern.TEntry')
-            entry.insert(0, default)
-            entry.grid(row=row_idx, column=1, sticky='w', pady=2)
-            setattr(self, attr_name, entry)
-        
-    def create_generate_section(self, parent, row):
-        """Seção de geração compacta"""
-        gen_frame = ttk.Frame(parent, style='Modern.TFrame')
-        gen_frame.grid(row=row, column=0, columnspan=2, pady=20)
-        
-        ttk.Button(gen_frame, text="🚀 GERAR RELEVO 3D", 
-                  command=self.gerar,
-                  style='Accent.TButton',
-                  width=20).pack(pady=10)
+        generate_btn = ttk.Button(parent, text="🪚 GERAR ENTALHE EM MADEIRA", 
+                                 command=self.gerar_entalhe, style='Wood.TButton')
+        generate_btn.pack(pady=20)
         
         # Status
-        self.status_label = ttk.Label(gen_frame, 
-                                     text="Pronto para processar",
-                                     style='Section.TLabel')
+        self.status_label = ttk.Label(parent, text="Pronto para criar entalhe em madeira", style='Wood.TLabel')
         self.status_label.pack()
         
-    def create_section(self, parent, title, row):
-        """Criar seção compacta"""
-        section_frame = ttk.Frame(parent, style='Modern.TFrame')
-        section_frame.grid(row=row, column=0, columnspan=2, sticky='ew', pady=8)
-        
-        ttk.Label(section_frame, text=title, style='Section.TLabel').pack(anchor='w')
-        
-        separator = ttk.Separator(section_frame, orient='horizontal')
-        separator.pack(fill='x', pady=(3, 0))
-        
-    def create_advanced_tab(self, parent):
-        """Aba avançada compacta"""
-        content = ttk.Frame(parent, style='Modern.TFrame')
-        content.pack(fill='both', expand=True, padx=15, pady=15)
-        
-        self.create_section(content, "⚙️ Parâmetros CNC", 0)
-        
-        advanced_params = [
-            ("Passo (mm):", "1.0", "entry_passo", 1),
-            ("Velocidade:", "1200", "entry_feed", 2),
-            ("Safe Z (mm):", "5", "entry_safez", 3)
-        ]
-        
-        for label, default, attr_name, row_idx in advanced_params:
-            ttk.Label(content, text=label, style='Section.TLabel').grid(
-                row=row_idx, column=0, sticky='w', pady=4)
-            
-            entry = ttk.Entry(content, width=10, style='Modern.TEntry')
-            entry.insert(0, default)
-            entry.grid(row=row_idx, column=1, sticky='w', pady=4, padx=(10,0))
-            setattr(self, attr_name, entry)
-        
-        # Tipo de Relevo
-        self.create_section(content, "🎨 Tipo de Relevo", 4)
-        
-        self.tipo_relevo = tk.StringVar(value="baixo")
-        relief_frame = ttk.Frame(content, style='Modern.TFrame')
-        relief_frame.grid(row=5, column=0, columnspan=2, sticky='w', pady=8)
-        
-        ttk.Radiobutton(relief_frame, text="Baixo Relevo", 
-                       variable=self.tipo_relevo, value="baixo",
-                       style='Modern.TRadiobutton').pack(side='left', padx=(0, 15))
-        ttk.Radiobutton(relief_frame, text="Alto Relevo", 
-                       variable=self.tipo_relevo, value="alto",
-                       style='Modern.TRadiobutton').pack(side='left')
+    def create_parameter(self, parent, label, default, row):
+        """Cria um campo de parâmetro"""
+        ttk.Label(parent, text=label, style='Wood.TLabel').grid(row=row, column=0, sticky='w', pady=5, padx=(0, 10))
+        entry = ttk.Entry(parent, width=10)
+        entry.insert(0, default)
+        entry.grid(row=row, column=1, sticky='w', pady=5)
+        return entry
         
     def selecionar_imagem(self):
         caminho = filedialog.askopenfilename(
-            title="Selecionar imagem",
-            filetypes=[("Imagens", "*.png;*.jpg;*.jpeg;*.bmp;*.tiff;*.tif")]
+            title="Selecionar imagem para entalhe",
+            filetypes=[("Imagens", "*.png;*.jpg;*.jpeg;*.bmp;*.tiff")]
         )
         if caminho:
             self.entry_imagem.delete(0, tk.END)
             self.entry_imagem.insert(0, caminho)
-            self.status_label.config(text=f"Imagem: {os.path.basename(caminho)}")
+            self.status_label.config(text=f"Imagem carregada: {os.path.basename(caminho)}")
             
-    def gerar(self):
+    def gerar_entalhe(self):
+        """Função principal para gerar entalhe em madeira"""
         try:
             img_path = self.entry_imagem.get()
             if not img_path or not os.path.exists(img_path):
@@ -493,45 +423,36 @@ class ModernCNCApp:
                 'altura_mm': float(self.entry_altura.get()),
                 'profundidade_max': float(self.entry_profundidade.get()),
                 'passo': float(self.entry_passo.get()),
-                'feedrate': float(self.entry_feed.get()),
-                'safe_z': float(self.entry_safez.get()),
-                'uso_ia': self.uso_ia.get(),
-                'tipo_relevo': self.tipo_relevo.get(),
-                'metodo_processamento': self.metodo_processamento.get()
+                'safe_z': 5.0,
+                'wood_type': self.tipo_madeira.get(),
+                'grain_direction': self.direcao_veio.get()
             }
 
-            self.status_label.config(text="Processando...")
+            self.status_label.config(text="Processando imagem para madeira...")
             self.root.update()
             
-            # Processar imagem
-            gcode_path, output_dir = self.processar_imagem_ia(img_path, **params)
-
-            if gcode_path and output_dir:
-                self.status_label.config(text="Concluído!")
-                messagebox.showinfo("Sucesso!", 
-                    f"✅ Relevo 3D gerado!\n\n"
-                    f"📁 Pasta: {output_dir}\n"
-                    f"⚡ G-code validado e pronto")
+            # Processar
+            success = self.processar_entalhe_madeira(img_path, params)
+            
+            if success:
+                self.status_label.config(text="✅ Entalhe gerado com sucesso!")
+                messagebox.showinfo("Sucesso!", "Entalhe em madeira gerado!\n\nVerifique a pasta 'WoodCarving_Output'")
             else:
-                self.status_label.config(text="Erro no processamento")
+                self.status_label.config(text="❌ Erro no processamento")
                 
         except Exception as e:
-            self.status_label.config(text="Erro no processamento")
+            self.status_label.config(text="❌ Erro no processamento")
             messagebox.showerror("Erro", f"Falha: {str(e)}")
 
-    def processar_imagem_ia(self, img_path, **params):
-        """Função de processamento CORRIGIDA - SEM NaN"""
+    def processar_entalhe_madeira(self, img_path, params):
+        """Processamento completo para entalhe em madeira"""
         try:
-            output_dir = os.path.join(os.getcwd(), "CNC_Output")
+            output_dir = os.path.join(os.getcwd(), "WoodCarving_Output")
             os.makedirs(output_dir, exist_ok=True)
 
-            # Carregar imagem
+            # Carregar e preparar imagem
             img = Image.open(img_path).convert("L")
             img_array_original = np.array(img) / 255.0
-            
-            # Garantir dados válidos
-            img_array_original = np.nan_to_num(img_array_original, nan=0.5)
-            img_array_original = np.clip(img_array_original, 0.001, 0.999)
             
             # Calcular dimensões
             img_ratio = img.width / img.height
@@ -547,39 +468,74 @@ class ModernCNCApp:
             # Redimensionar
             img_resized = img.resize((new_width, new_height), Image.LANCZOS)
             img_array = np.array(img_resized) / 255.0
-            img_array = np.nan_to_num(img_array, nan=0.5)
-            img_array = np.clip(img_array, 0.001, 0.999)
-
-            # Processar com IA
-            ai_processor = AICNCProcessor()
             
-            if params['uso_ia']:
-                z_map = ai_processor.processar_imagem_inteligente(
-                    img_array, params['profundidade_max'], params['metodo_processamento']
-                )
-            else:
-                if params['tipo_relevo'] == "baixo":
-                    z_map = (1 - img_array) * params['profundidade_max']
-                else:
-                    z_map = img_array * params['profundidade_max']
+            # PROCESSAMENTO ESPECÍFICO PARA MADEIRA
+            z_map = self.wood_ai.processar_para_madeira(
+                img_array, 
+                params['profundidade_max'],
+                params['wood_type'],
+                params['grain_direction']
+            )
             
-            # GARANTIR saída válida
+            # Garantir dados válidos
             z_map = np.nan_to_num(z_map, nan=0.0)
             z_map = np.clip(z_map, 0.0, params['profundidade_max'])
             
-            # Salvar comparação
-            salvar_comparacao_visual(img_array, z_map, output_dir)
-
-            # Gerar G-code CORRIGIDO
-            gcode_path = os.path.join(output_dir, "relevo_3d.nc")
-            success = gerar_gcode_otimizado(z_map, params['passo'], params['feedrate'], 
-                                          params['safe_z'], gcode_path, new_width, new_height)
-
-            return gcode_path, output_dir if success else (None, None)
+            # Salvar visualização
+            self.salvar_visualizacao_madeira(img_array, z_map, output_dir, params)
+            
+            # Gerar G-code para madeira
+            gcode_path = os.path.join(output_dir, "entalhe_madeira.nc")
+            params['output_path'] = gcode_path
+            
+            success = self.gcode_gen.gerar_gcode_madeira(z_map, params)
+            
+            return success
 
         except Exception as e:
-            print(f"Erro no processamento: {str(e)}")
-            return None, None
+            print(f"Erro no processamento madeira: {str(e)}")
+            return False
+
+    def salvar_visualizacao_madeira(self, img_original, z_map, output_dir, params):
+        """Salva visualização específica para madeira"""
+        try:
+            fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+            fig.suptitle(f'Análise para Entalhe em Madeira ({params["wood_type"].upper()})', fontsize=16)
+            
+            # Imagem original
+            axes[0,0].imshow(img_original, cmap='gray')
+            axes[0,0].set_title('Imagem Original')
+            axes[0,0].axis('off')
+            
+            # Mapa de profundidade
+            im = axes[0,1].imshow(z_map, cmap='terrain')
+            axes[0,1].set_title('Mapa de Profundidade (mm)')
+            axes[0,1].axis('off')
+            plt.colorbar(im, ax=axes[0,1])
+            
+            # Perfil 3D
+            from mpl_toolkits.mplot3d import Axes3D
+            x = np.arange(z_map.shape[1])
+            y = np.arange(z_map.shape[0])
+            X, Y = np.meshgrid(x, y)
+            
+            ax3d = fig.add_subplot(2, 2, (3, 4), projection='3d')
+            surf = ax3d.plot_surface(X, Y, z_map, cmap='terrain', alpha=0.8)
+            ax3d.set_title('Visualização 3D do Entalhe')
+            
+            # Histograma de profundidades
+            axes[1,1].hist(z_map.flatten(), bins=50, alpha=0.7, color='brown')
+            axes[1,1].set_title('Distribuição de Profundidades')
+            axes[1,1].set_xlabel('Profundidade (mm)')
+            axes[1,1].set_ylabel('Frequência')
+            
+            plt.tight_layout()
+            plt.savefig(os.path.join(output_dir, 'analise_entalhe_madeira.png'), 
+                       dpi=150, bbox_inches='tight')
+            plt.close()
+            
+        except Exception as e:
+            print(f"Erro ao salvar visualização: {e}")
 
 # ==============================================
 # EXECUÇÃO
@@ -587,6 +543,6 @@ class ModernCNCApp:
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = ModernCNCApp(root)
+    app = WoodCarvingApp(root)
     root.mainloop()
     
