@@ -1,548 +1,650 @@
-import os
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
-from PIL import Image, ImageOps, ImageFilter, ImageEnhance
-import numpy as np
-import cv2
-import matplotlib.pyplot as plt
-from scipy import ndimage
+import json
+import time
+from datetime import datetime
+import math
+from scipy import signal
+from sklearn.cluster import DBSCAN
+import matplotlib.patches as patches
 
 # ==============================================
-# CLASSE IA ESPECIALIZADA PARA MADEIRA
+# ANALISADOR DE VIABILIDADE PARA MADEIRA
 # ==============================================
 
-class WoodCarvingAI:
+class WoodFeasibilityAnalyzer:
     def __init__(self):
-        self.wood_grain_cache = {}
-        
-    def processar_para_madeira(self, image_array, profundidade_max, tipo_madeira="medium", direcao_veio="horizontal"):
-        """
-        Processamento OTIMIZADO para entalhe em madeira
-        """
-        try:
-            # Garantir dados válidos
-            image_array = self._preprocessar_imagem(image_array)
-            
-            # Aplicar filtros específicos para madeira
-            if tipo_madeira == "soft":  # Madeiras macias (Pinho, Cedro)
-                return self._processar_madeira_macia(image_array, profundidade_max, direcao_veio)
-            elif tipo_madeira == "hard":  # Madeiras duras (Carvalho, Mogno)
-                return self._processar_madeira_dura(image_array, profundidade_max, direcao_veio)
-            else:  # Medium (Nogueira, Cerejeira)
-                return self._processar_madeira_media(image_array, profundidade_max, direcao_veio)
-                
-        except Exception as e:
-            print(f"Erro no processamento para madeira: {e}")
-            return self._processar_tradicional(image_array, profundidade_max)
-
-    def _processar_madeira_macia(self, image_array, profundidade_max, direcao_veio):
-        """
-        Para madeiras macias - cortes mais suaves, menos detalhes finos
-        """
-        # Suavização mais agressiva
-        img_suavizada = cv2.GaussianBlur(image_array, (5, 5), 1.2)
-        
-        # Realçar contornos médios (evitar detalhes muito finos)
-        edges = cv2.Canny((img_suavizada * 255).astype(np.uint8), 50, 150) / 255.0
-        
-        # Combinar com imagem suavizada
-        z_map = (1 - img_suavizada) * profundidade_max * 0.7 + edges * profundidade_max * 0.3
-        
-        # Aplicar veio da madeira
-        z_map = self._aplicar_efeito_veio(z_map, direcao_veio, intensidade=0.1)
-        
-        return np.clip(z_map, 0, profundidade_max)
-
-    def _processar_madeira_dura(self, image_array, profundidade_max, direcao_veio):
-        """
-        Para madeiras duras - permite mais detalhes e definição
-        """
-        # Suavização leve
-        img_suavizada = cv2.GaussianBlur(image_array, (3, 3), 0.8)
-        
-        # Realçar detalhes finos
-        kernel_aguçamento = np.array([[-1, -1, -1],
-                                    [-1,  9, -1],
-                                    [-1, -1, -1]])
-        img_detalhada = cv2.filter2D(img_suavizada, -1, kernel_aguçamento)
-        
-        # Detecção de bordas para detalhes
-        edges = cv2.Canny((img_detalhada * 255).astype(np.uint8), 70, 180) / 255.0
-        
-        # Mapeamento mais agressivo para detalhes
-        z_map = (1 - img_detalhada) * profundidade_max * 0.6 + edges * profundidade_max * 0.4
-        
-        # Efeito de veio mais sutil
-        z_map = self._aplicar_efeito_veio(z_map, direcao_veio, intensidade=0.05)
-        
-        return np.clip(z_map, 0, profundidade_max)
-
-    def _processar_madeira_media(self, image_array, profundidade_max, direcao_veio):
-        """
-        Para madeiras de densidade média - equilíbrio entre detalhe e suavidade
-        """
-        # Suavização moderada
-        img_suavizada = cv2.GaussianBlur(image_array, (3, 3), 1.0)
-        
-        # Aguçamento moderado
-        kernel_aguçamento = np.array([[0, -0.5, 0],
-                                    [-0.5, 3, -0.5],
-                                    [0, -0.5, 0]])
-        img_aprimorada = cv2.filter2D(img_suavizada, -1, kernel_aguçamento)
-        
-        # Mapeamento balanceado
-        z_map = (1 - img_aprimorada) * profundidade_max
-        
-        # Curva gamma para melhor distribuição
-        gamma = 0.7
-        z_map_normalized = np.clip(z_map / profundidade_max, 0.001, 0.999)
-        z_map = np.power(z_map_normalized, gamma) * profundidade_max
-        
-        # Efeito de veio
-        z_map = self._aplicar_efeito_veio(z_map, direcao_veio, intensidade=0.08)
-        
-        return np.clip(z_map, 0, profundidade_max)
-
-    def _aplicar_efeito_veio(self, z_map, direcao, intensidade=0.1):
-        """
-        Adiciona efeito de veio da madeira ao mapa de profundidade
-        """
-        try:
-            rows, cols = z_map.shape
-            
-            # Criar padrão de veio
-            if direcao == "horizontal":
-                veio = np.sin(np.linspace(0, 4*np.pi, cols))
-                veio = np.tile(veio, (rows, 1))
-            elif direcao == "vertical":
-                veio = np.sin(np.linspace(0, 4*np.pi, rows))
-                veio = np.tile(veio.reshape(-1, 1), (1, cols))
-            else:  # diagonal
-                x = np.linspace(0, 4*np.pi, cols)
-                y = np.linspace(0, 4*np.pi, rows)
-                X, Y = np.meshgrid(x, y)
-                veio = np.sin(X + Y)
-            
-            # Aplicar veio com intensidade controlada
-            z_map_com_veio = z_map * (1 + veio * intensidade * 0.5)
-            
-            return np.clip(z_map_com_veio, z_map.min(), z_map.max())
-            
-        except:
-            return z_map
-
-    def _preprocessar_imagem(self, image_array):
-        """Pré-processamento robusto"""
-        image_array = np.nan_to_num(image_array, nan=0.5)
-        image_array = np.clip(image_array, 0.001, 0.999)
-        return image_array
-
-    def _processar_tradicional(self, image_array, profundidade_max):
-        """Fallback seguro"""
-        image_array = self._preprocessar_imagem(image_array)
-        z_map = (1 - image_array) * profundidade_max
-        return np.clip(z_map, 0, profundidade_max)
-
-# ==============================================
-# GERADOR G-CODE PARA MADEIRA
-# ==============================================
-
-class WoodGCodeGenerator:
-    def __init__(self):
-        self.wood_configs = {
-            "soft": {"feedrate": 2000, "stepover": 0.8, "depth_increment": 0.5},
-            "medium": {"feedrate": 1500, "stepover": 0.6, "depth_increment": 0.3},
-            "hard": {"feedrate": 1000, "stepover": 0.4, "depth_increment": 0.2}
+        self.wood_properties = {
+            "soft": {
+                "max_detail": 0.8,    # Detalhamento máximo (0-1)
+                "max_depth": 10.0,    # Profundidade máxima (mm)
+                "min_feature_size": 1.5,  # Tamanho mínimo de característica (mm)
+                "recommended_bits": ["V-bit 60°", "Ballnose 3mm"]
+            },
+            "medium": {
+                "max_detail": 0.9,
+                "max_depth": 8.0,
+                "min_feature_size": 1.0,
+                "recommended_bits": ["V-bit 90°", "Ballnose 2mm", "Endmill 1mm"]
+            },
+            "hard": {
+                "max_detail": 0.95,
+                "max_depth": 6.0,
+                "min_feature_size": 0.5,
+                "recommended_bits": ["V-bit 120°", "Ballnose 1mm", "Endmill 0.5mm"]
+            }
         }
     
-    def gerar_gcode_madeira(self, z_map, params):
-        """
-        Gera G-code otimizado para entalhe em madeira
-        """
+    def analisar_viabilidade(self, z_map, params, wood_type):
+        """Analisa se o design é viável para o tipo de madeira selecionado"""
+        analysis = {
+            "viable": True,
+            "warnings": [],
+            "recommendations": [],
+            "statistics": {}
+        }
+        
+        props = self.wood_properties[wood_type]
+        
+        # Estatísticas básicas
+        analysis["statistics"]["max_depth"] = np.max(z_map)
+        analysis["statistics"]["min_depth"] = np.min(z_map)
+        analysis["statistics"]["avg_depth"] = np.mean(z_map)
+        analysis["statistics"]["depth_range"] = np.max(z_map) - np.min(z_map)
+        
+        # Verificar profundidade máxima
+        if analysis["statistics"]["max_depth"] > props["max_depth"]:
+            analysis["warnings"].append(
+                f"Profundidade máxima ({analysis['statistics']['max_depth']:.1f}mm) "
+                f"excede recomendação para {wood_type} ({props['max_depth']}mm)"
+            )
+            analysis["viable"] = False
+        
+        # Analisar detalhes finos
+        detail_analysis = self._analisar_detalhes_finos(z_map, params['passo'])
+        analysis["statistics"].update(detail_analysis)
+        
+        if detail_analysis["smallest_feature"] < props["min_feature_size"]:
+            analysis["warnings"].append(
+                f"Detalhes muito finos ({detail_analysis['smallest_feature']:.1f}mm) "
+                f"para madeira {wood_type} (mínimo: {props['min_feature_size']}mm)"
+            )
+        
+        # Verificar inclinações íngremes
+        slope_analysis = self._analisar_inclinacoes(z_map, params['passo'])
+        analysis["statistics"].update(slope_analysis)
+        
+        if slope_analysis["max_slope"] > 75:  # graus
+            analysis["warnings"].append(
+                f"Inclinações muito íngremes ({slope_analysis['max_slope']:.1f}°) "
+                f"podem causar fraturas na madeira"
+            )
+        
+        # Gerar recomendações
+        analysis["recommendations"] = self._gerar_recomendacoes(analysis, props, wood_type)
+        
+        return analysis
+    
+    def _analisar_detalhes_finos(self, z_map, passo):
+        """Analisa a presença de detalhes muito finos"""
+        # Calcular gradientes para identificar bordas finas
+        grad_x = np.gradient(z_map, axis=1)
+        grad_y = np.gradient(z_map, axis=0)
+        grad_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+        
+        # Identificar características pequenas
+        threshold = np.percentile(grad_magnitude, 95)
+        high_detail_mask = grad_magnitude > threshold
+        
+        # Estimar tamanho das menores características
+        if np.any(high_detail_mask):
+            labeled_array, num_features = ndimage.label(high_detail_mask)
+            feature_sizes = []
+            
+            for i in range(1, num_features + 1):
+                feature_mask = labeled_array == i
+                feature_size = np.sum(feature_mask) * passo
+                if feature_size > 0:
+                    feature_sizes.append(feature_size)
+            
+            smallest_feature = min(feature_sizes) if feature_sizes else 0
+        else:
+            smallest_feature = float('inf')
+        
+        return {
+            "smallest_feature": smallest_feature,
+            "detail_density": np.mean(high_detail_mask),
+            "gradient_variance": np.var(grad_magnitude)
+        }
+    
+    def _analisar_inclinacoes(self, z_map, passo):
+        """Analisa inclinações no mapa de profundidade"""
+        grad_x = np.gradient(z_map, axis=1) / passo
+        grad_y = np.gradient(z_map, axis=0) / passo
+        
+        slopes_rad = np.arctan(np.sqrt(grad_x**2 + grad_y**2))
+        slopes_deg = np.degrees(slopes_rad)
+        
+        return {
+            "max_slope": np.max(slopes_deg),
+            "avg_slope": np.mean(slopes_deg),
+            "steep_area_ratio": np.mean(slopes_deg > 45)
+        }
+    
+    def _gerar_recomendacoes(self, analysis, props, wood_type):
+        """Gera recomendações baseadas na análise"""
+        recommendations = []
+        stats = analysis["statistics"]
+        
+        # Recomendações de ferramentas
+        recommendations.append(f"Ferramentas recomendadas: {', '.join(props['recommended_bits'])}")
+        
+        # Recomendações de estratégia
+        if stats["depth_range"] > props["max_depth"] * 0.7:
+            recommendations.append("Considere usar múltiplos passes para profundidades variadas")
+        
+        if stats["detail_density"] > 0.3:
+            recommendations.append("Alta densidade de detalhes - use ferramentas menores e velocidade reduzida")
+        
+        if stats["steep_area_ratio"] > 0.2:
+            recommendations.append("Áreas íngremes detectadas - considere suavizar inclinações")
+        
+        # Recomendações de velocidade
+        if wood_type == "hard":
+            recommendations.append("Madeira dura: Reduza velocidade em 30% e use refrigerante")
+        elif wood_type == "soft":
+            recommendations.append("Madeira macia: Aumente velocidade em 20% para melhor acabamento")
+        
+        return recommendations
+
+# ==============================================
+# GERADOR DE ESTRATÉGIAS DE USINAGEM
+# ==============================================
+
+class MachiningStrategyGenerator:
+    def __init__(self):
+        self.strategies = {
+            "high_speed_roughing": {
+                "description": "Desbaste rápido para remoção de material",
+                "stepover": 0.8,
+                "depth_per_pass": 2.0,
+                "feedrate_multiplier": 1.2
+            },
+            "detail_finishing": {
+                "description": "Acabamento fino para detalhes",
+                "stepover": 0.3,
+                "depth_per_pass": 0.5,
+                "feedrate_multiplier": 0.7
+            },
+            "contour_following": {
+                "description": "Seguimento de contornos para relevos complexos",
+                "stepover": 0.4,
+                "depth_per_pass": 1.0,
+                "feedrate_multiplier": 0.9
+            }
+        }
+    
+    def gerar_estrategia_completa(self, z_map, wood_type, complexity):
+        """Gera estratégia completa de usinagem"""
+        strategy = {
+            "roughing": self._gerar_estrategia_desbaste(z_map, wood_type),
+            "finishing": self._gerar_estrategia_acabamento(z_map, wood_type, complexity),
+            "tool_paths": [],
+            "estimated_time": 0
+        }
+        
+        # Calcular tempo estimado
+        strategy["estimated_time"] = self._calcular_tempo_estimado(strategy, wood_type)
+        
+        return strategy
+    
+    def _gerar_estrategia_desbaste(self, z_map, wood_type):
+        """Gera estratégia de desbaste"""
+        max_depth = np.max(z_map)
+        
+        if wood_type == "soft":
+            depth_per_pass = 3.0
+            num_passes = max(1, math.ceil(max_depth / depth_per_pass))
+        elif wood_type == "hard":
+            depth_per_pass = 1.0
+            num_passes = max(1, math.ceil(max_depth / depth_per_pass))
+        else:  # medium
+            depth_per_pass = 2.0
+            num_passes = max(1, math.ceil(max_depth / depth_per_pass))
+        
+        return {
+            "type": "roughing",
+            "depth_per_pass": depth_per_pass,
+            "num_passes": num_passes,
+            "stepover": 0.7,
+            "feedrate": "alta" if wood_type == "soft" else "media"
+        }
+    
+    def _gerar_estrategia_acabamento(self, z_map, wood_type, complexity):
+        """Gera estratégia de acabamento"""
+        detail_level = self._calcular_nivel_detalhe(z_map)
+        
+        if complexity == "high" or detail_level > 0.6:
+            # Alto detalhe - múltiplas estratégias
+            strategies = [
+                {
+                    "type": "contour_finishing",
+                    "stepover": 0.2,
+                    "feedrate": "baixa",
+                    "purpose": "Contornos principais"
+                },
+                {
+                    "type": "detail_finishing", 
+                    "stepover": 0.1,
+                    "feedrate": "muito_baixa",
+                    "purpose": "Detalhes finos"
+                }
+            ]
+        else:
+            # Detalhe médio/baixo
+            strategies = [
+                {
+                    "type": "finishing",
+                    "stepover": 0.3,
+                    "feedrate": "media",
+                    "purpose": "Acabamento geral"
+                }
+            ]
+        
+        return strategies
+    
+    def _calcular_nivel_detalhe(self, z_map):
+        """Calcula o nível de detalhe do mapa"""
+        grad_x = np.gradient(z_map, axis=1)
+        grad_y = np.gradient(z_map, axis=0)
+        grad_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+        
+        # Normalizar e retornar métrica de detalhe
+        return np.mean(grad_magnitude) / np.max(grad_magnitude) if np.max(grad_magnitude) > 0 else 0
+    
+    def _calcular_tempo_estimado(self, strategy, wood_type):
+        """Calcula tempo estimado de usinagem"""
+        base_time = 60  # minutos base
+        
+        # Ajustar por tipo de madeira
+        if wood_type == "hard":
+            base_time *= 1.5
+        elif wood_type == "soft":
+            base_time *= 0.8
+        
+        # Ajustar por complexidade
+        roughing_time = base_time * 0.4
+        finishing_time = base_time * 0.6 * len(strategy["finishing"])
+        
+        return roughing_time + finishing_time
+
+# ==============================================
+# SISTEMA DE RELATÓRIOS PROFISSIONAIS
+# ==============================================
+
+class ProfessionalReportGenerator:
+    def __init__(self):
+        self.template = """
+# RELATÓRIO DE ENTALHE EM MADEIRA
+**Data:** {date}
+**Projeto:** {project_name}
+
+## 📊 RESUMO EXECUTIVO
+{executive_summary}
+
+## 🪵 CONFIGURAÇÕES DA MADEIRA
+{t_wood_settings}
+
+## ⚙️ PARÂMETROS TÉCNICOS
+{t_technical_params}
+
+## 📈 ANÁLISE DE VIABILIDADE
+{t_feasibility_analysis}
+
+## 🛠️ ESTRATÉGIA DE USINAGEM
+{t_machining_strategy}
+
+## ⚠️ RECOMENDAÇÕES E ALERTAS
+{t_recommendations}
+
+## 📋 LISTA DE MATERIAIS
+{t_materials_list}
+
+---
+*Relatório gerado automaticamente por Wood Carving Studio Pro*
+"""
+    
+    def gerar_relatorio_completo(self, analysis_data, output_path):
+        """Gera relatório profissional completo"""
         try:
-            gcode_path = params['output_path']
-            wood_type = params.get('wood_type', 'medium')
-            config = self.wood_configs[wood_type]
+            report_content = self.template.format(
+                date=datetime.now().strftime("%d/%m/%Y %H:%M"),
+                project_name=analysis_data.get("project_name", "Entalhe em Madeira"),
+                executive_summary=self._gerar_resumo_executivo(analysis_data),
+                t_wood_settings=self._formatar_config_madeira(analysis_data),
+                t_technical_params=self._formatar_parametros_tecnicos(analysis_data),
+                t_feasibility_analysis=self._formatar_analise_viabilidade(analysis_data),
+                t_machining_strategy=self._formatar_estrategia_usinagem(analysis_data),
+                t_recommendations=self._formatar_recomendacoes(analysis_data),
+                t_materials_list=self._formatar_lista_materiais(analysis_data)
+            )
             
-            with open(gcode_path, "w", encoding='utf-8') as f:
-                # CABEÇALHO ESPECÍFICO PARA MADEIRA
-                f.write("(G-code para Entalhe em Madeira - Gerado com IA)\n")
-                f.write("(OTIMIZADO PARA USINAGEM EM MADEIRA)\n")
-                f.write("G21 G90 G17 G94 G49 G40\n")
-                f.write(f"F{config['feedrate']}\n")
-                f.write("S10000 (RPM SPINDLE)\n\n")
-                
-                # POSICIONAMENTO SEGURO
-                f.write(f"G0 Z{params['safe_z']:.3f}\n")
-                f.write("G0 X0 Y0\n")
-                f.write("M3 (LIGAR SPINDLE)\n")
-                f.write("G4 P2 (AGUARDAR SPINDLE)\n\n")
-                
-                # GERAR PERCURSO OTIMIZADO
-                self._gerar_percurso_madeira(f, z_map, params, config)
-                
-                # FINALIZAÇÃO
-                f.write(f"\nG0 Z{params['safe_z']:.3f}\n")
-                f.write("M5 (DESLIGAR SPINDLE)\n")
-                f.write("G0 X0 Y0\n")
-                f.write("M30\n\n")
-                
-                # ESTATÍSTICAS
-                f.write("; === ESTATÍSTICAS MADEIRA ===\n")
-                f.write(f"; Tipo: {wood_type.upper()}\n")
-                f.write(f"; Velocidade: {config['feedrate']} mm/min\n")
-                f.write(f"; RPM: 10000\n")
-                f.write(f"; Dimensões: {z_map.shape[1]}x{z_map.shape[0]} pontos\n")
+            # Salvar relatório
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(report_content)
             
-            print(f"✅ G-code para madeira {wood_type} gerado: {gcode_path}")
+            # Gerar versão JSON para análise
+            json_path = output_path.replace('.txt', '_data.json')
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(analysis_data, f, indent=2, ensure_ascii=False)
+            
             return True
             
         except Exception as e:
-            print(f"❌ Erro ao gerar G-code madeira: {e}")
+            print(f"Erro ao gerar relatório: {e}")
             return False
+    
+    def _gerar_resumo_executivo(self, data):
+        """Gera resumo executivo do projeto"""
+        viability = data["feasibility_analysis"]
+        stats = viability["statistics"]
+        
+        summary = f"""
+• **Status:** {'✅ VIÁVEL' if viability['viable'] else '❌ NÃO VIÁVEL'}
+• **Dimensões:** {data['params']['largura_mm']} x {data['params']['altura_mm']} mm
+• **Profundidade Máxima:** {stats['max_depth']:.1f} mm
+• **Tipo de Madeira:** {data['wood_type'].upper()}
+• **Tempo Estimado:** {data['machining_strategy']['estimated_time']:.0f} min
+• **Complexidade:** {'ALTA' if stats['detail_density'] > 0.4 else 'MÉDIA' if stats['detail_density'] > 0.2 else 'BAIXA'}
+"""
+        return summary
+    
+    def _formatar_config_madeira(self, data):
+        """Formata configurações da madeira"""
+        return f"""
+• **Tipo:** {data['wood_type'].upper()}
+• **Direção do Veio:** {data['grain_direction']}
+• **Ferramentas Recomendadas:** {', '.join(data.get('recommended_tools', ['V-bit 90°', 'Ballnose']))}
+"""
+    
+    def _formatar_analise_viabilidade(self, data):
+        """Formata análise de viabilidade"""
+        viability = data["feasibility_analysis"]
+        stats = viability["statistics"]
+        
+        content = f"""
+## 📊 Estatísticas Principais
+• Profundidade Máxima: {stats['max_depth']:.1f} mm
+• Profundidade Média: {stats['avg_depth']:.1f} mm  
+• Menor Característica: {stats['smallest_feature']:.1f} mm
+• Densidade de Detalhes: {stats['detail_density']:.1%}
+• Inclinação Máxima: {stats['max_slope']:.1f}°
 
-    def _gerar_percurso_madeira(self, f, z_map, params, config):
-        """Gera percurso otimizado para madeira"""
-        rows, cols = z_map.shape
-        passo = params['passo']
-        safe_z = params['safe_z']
-        
-        # ESTRATÉGIA: Varredura em múltiplas passes para madeira dura
-        max_depth = np.max(z_map)
-        if params.get('wood_type') == 'hard' and max_depth > 2:
-            num_passes = max(2, int(max_depth / config['depth_increment']))
-        else:
-            num_passes = 1
-        
-        for pass_num in range(num_passes):
-            if num_passes > 1:
-                f.write(f"\n(PASSE {pass_num + 1} de {num_passes})\n")
-            
-            depth_factor = (pass_num + 1) / num_passes
-            
-            for y in range(rows):
-                # Alternar direção (zig-zag)
-                if y % 2 == 0:
-                    x_range = range(cols)
-                else:
-                    x_range = range(cols - 1, -1, -1)
-                
-                primeiro_ponto = True
-                
-                for x in x_range:
-                    z_original = z_map[y, x]
-                    
-                    # Para múltiplos passes, calcular profundidade deste passe
-                    if num_passes > 1:
-                        z_target = z_original * depth_factor
-                    else:
-                        z_target = z_original
-                    
-                    # VALIDAÇÃO CRÍTICA
-                    if np.isnan(z_target) or np.isinf(z_target):
-                        z_target = 0.0
-                    else:
-                        z_target = max(0.0, min(z_target, params['profundidade_max']))
-                    
-                    pos_x = (x * passo) - (cols * passo / 2)
-                    pos_y = (y * passo) - (rows * passo / 2)
-                    
-                    if primeiro_ponto:
-                        f.write(f"G0 X{pos_x:.3f} Y{pos_y:.3f}\n")
-                        f.write(f"G1 Z{z_target:.3f}\n")
-                        primeiro_ponto = False
-                    else:
-                        f.write(f"G1 X{pos_x:.3f} Y{pos_y:.3f} Z{z_target:.3f}\n")
+## ⚠️ Alertas
+{chr(10).join(['• ' + warning for warning in viability['warnings']]) or '• Nenhum alerta crítico'}
+"""
+        return content
 
 # ==============================================
-# INTERFACE MODERNA PARA MADEIRA
+# INTERFACE AVANÇADA COM RELATÓRIOS
 # ==============================================
 
-class WoodCarvingApp:
+class AdvancedWoodCarvingApp(WoodCarvingApp):
     def __init__(self, root):
-        self.root = root
-        self.wood_ai = WoodCarvingAI()
-        self.gcode_gen = WoodGCodeGenerator()
-        self.setup_ui()
+        super().__init__(root)
+        self.analyzer = WoodFeasibilityAnalyzer()
+        self.strategy_gen = MachiningStrategyGenerator()
+        self.report_gen = ProfessionalReportGenerator()
         
-    def setup_ui(self):
-        self.root.title("🪵 Wood Carving Studio Pro")
-        self.root.geometry("900x750")
-        self.root.configure(bg='#8B4513')  # Fundo marrom madeira
-        self.root.resizable(True, True)
+        # Adicionar abas avançadas
+        self.setup_advanced_interface()
+    
+    def setup_advanced_interface(self):
+        """Adiciona funcionalidades avançadas à interface"""
+        # Adicionar aba de Análise
+        notebook = self.root.winfo_children()[0].winfo_children()[1]  # Acessar notebook
         
-        self.setup_styles()
-        self.create_main_interface()
+        # Aba de Análise
+        tab_analise = ttk.Frame(notebook, style='Wood.TFrame')
+        notebook.add(tab_analise, text="📊 Análise")
+        self.create_analysis_tab(tab_analise)
         
-    def setup_styles(self):
-        style = ttk.Style()
-        style.theme_use('clam')
+        # Aba de Relatórios
+        tab_relatorios = ttk.Frame(notebook, style='Wood.TFrame')
+        notebook.add(tab_relatorios, text="📋 Relatório")
+        self.create_reports_tab(tab_relatorios)
+    
+    def create_analysis_tab(self, parent):
+        """Cria aba de análise detalhada"""
+        # Frame de análise
+        analysis_frame = ttk.Frame(parent, style='Wood.TFrame')
+        analysis_frame.pack(fill='both', expand=True, padx=10, pady=10)
         
-        # Cores de madeira
-        style.configure('Wood.TFrame', background='#DEB887')
-        style.configure('Wood.TLabel', background='#DEB887', foreground='#8B4513', font=('Segoe UI', 10))
-        style.configure('WoodTitle.TLabel', background='#DEB887', foreground='#654321', 
-                       font=('Segoe UI', 16, 'bold'))
-        style.configure('Wood.TButton', background='#A0522D', foreground='white',
-                       font=('Segoe UI', 9, 'bold'))
-        style.map('Wood.TButton', background=[('active', '#8B4513')])
+        # Botão de análise
+        self.analyze_btn = ttk.Button(analysis_frame, text="🔍 ANALISAR VIABILIDADE",
+                                     command=self.analisar_projeto, style='Wood.TButton')
+        self.analyze_btn.pack(pady=10)
         
-    def create_main_interface(self):
-        # Frame principal
-        main_frame = ttk.Frame(self.root, style='Wood.TFrame')
-        main_frame.pack(fill='both', expand=True, padx=20, pady=20)
+        # Área de resultados
+        self.analysis_text = tk.Text(analysis_frame, height=20, width=80, bg='#F5F5DC', fg='#333333')
+        self.analysis_text.pack(fill='both', expand=True, pady=10)
         
-        # Título
-        title = ttk.Label(main_frame, text="🪵 Wood Carving Studio Pro", style='WoodTitle.TLabel')
-        title.pack(pady=(0, 20))
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(self.analysis_text)
+        scrollbar.pack(side='right', fill='y')
+        self.analysis_text.config(yscrollcommand=scrollbar.set)
+        scrollbar.config(command=self.analysis_text.yview)
+    
+    def create_reports_tab(self, parent):
+        """Cria aba de relatórios"""
+        report_frame = ttk.Frame(parent, style='Wood.TFrame')
+        report_frame.pack(fill='both', expand=True, padx=10, pady=10)
         
-        # Abas
-        notebook = ttk.Notebook(main_frame)
-        notebook.pack(fill='both', expand=True)
+        # Controles de relatório
+        ttk.Label(report_frame, text="Nome do Projeto:", style='Wood.TLabel').pack(anchor='w', pady=5)
+        self.entry_project_name = ttk.Entry(report_frame, width=40)
+        self.entry_project_name.pack(fill='x', pady=5)
+        self.entry_project_name.insert(0, "Meu Entalhe em Madeira")
         
-        # Aba Principal
-        tab_principal = ttk.Frame(notebook, style='Wood.TFrame')
-        notebook.add(tab_principal, text="⚙️ Configurações")
+        # Botões
+        btn_frame = ttk.Frame(report_frame, style='Wood.TFrame')
+        btn_frame.pack(fill='x', pady=15)
         
-        # Aba Madeira
-        tab_madeira = ttk.Frame(notebook, style='Wood.TFrame')
-        notebook.add(tab_madeira, text="🪵 Tipo de Madeira")
+        ttk.Button(btn_frame, text="📄 GERAR RELATÓRIO", 
+                  command=self.gerar_relatorio, style='Wood.TButton').pack(side='left', padx=5)
         
-        self.create_wood_settings_tab(tab_madeira)
-        self.create_main_settings_tab(tab_principal)
+        ttk.Button(btn_frame, text="💾 SALVAR ANÁLISE", 
+                  command=self.salvar_analise, style='Wood.TButton').pack(side='left', padx=5)
         
-    def create_wood_settings_tab(self, parent):
-        """Aba específica para configurações de madeira"""
-        # Tipo de Madeira
-        ttk.Label(parent, text="Selecione o Tipo de Madeira:", style='Wood.TLabel').pack(anchor='w', pady=(10,5))
-        
-        self.tipo_madeira = tk.StringVar(value="medium")
-        
-        wood_frame = ttk.Frame(parent, style='Wood.TFrame')
-        wood_frame.pack(fill='x', pady=5)
-        
-        ttk.Radiobutton(wood_frame, text="🔸 Macia (Pinho, Cedro)", 
-                       variable=self.tipo_madeira, value="soft", style='Wood.TLabel').pack(side='left', padx=10)
-        ttk.Radiobutton(wood_frame, text="🔸 Média (Nogueira, Cerejeira)", 
-                       variable=self.tipo_madeira, value="medium", style='Wood.TLabel').pack(side='left', padx=10)
-        ttk.Radiobutton(wood_frame, text="🔸 Dura (Carvalho, Mogno)", 
-                       variable=self.tipo_madeira, value="hard", style='Wood.TLabel').pack(side='left', padx=10)
-        
-        # Direção do Veio
-        ttk.Label(parent, text="Direção do Veio:", style='Wood.TLabel').pack(anchor='w', pady=(15,5))
-        
-        self.direcao_veio = tk.StringVar(value="horizontal")
-        
-        grain_frame = ttk.Frame(parent, style='Wood.TFrame')
-        grain_frame.pack(fill='x', pady=5)
-        
-        ttk.Radiobutton(grain_frame, text="➡️ Horizontal", 
-                       variable=self.direcao_veio, value="horizontal", style='Wood.TLabel').pack(side='left', padx=10)
-        ttk.Radiobutton(grain_frame, text="⬇️ Vertical", 
-                       variable=self.direcao_veio, value="vertical", style='Wood.TLabel').pack(side='left', padx=10)
-        ttk.Radiobutton(grain_frame, text="↘️ Diagonal", 
-                       variable=self.direcao_veio, value="diagonal", style='Wood.TLabel').pack(side='left', padx=10)
-        
-        # Dicas para cada tipo de madeira
-        tips_frame = ttk.Frame(parent, style='Wood.TFrame')
-        tips_frame.pack(fill='x', pady=15)
-        
-        tips_text = """
-        💡 DICAS PARA ENTALHE:
-        
-        • MACIA: Ideal para peças grandes, menos detalhadas
-        • MÉDIA: Equilíbrio entre detalhe e facilidade de usinagem  
-        • DURA: Para peças pequenas e altamente detalhadas
-        • Use ferramentas afiadas e refrigerante para madeiras duras
-        """
-        
-        tips_label = ttk.Label(tips_frame, text=tips_text, style='Wood.TLabel', justify='left')
-        tips_label.pack(anchor='w')
-        
-    def create_main_settings_tab(self, parent):
-        """Aba principal de configurações"""
-        # Seleção de arquivo
-        ttk.Label(parent, text="Imagem para Entalhe:", style='Wood.TLabel').pack(anchor='w', pady=(10,5))
-        
-        file_frame = ttk.Frame(parent, style='Wood.TFrame')
-        file_frame.pack(fill='x', pady=5)
-        
-        self.entry_imagem = ttk.Entry(file_frame, width=50)
-        self.entry_imagem.pack(side='left', fill='x', expand=True, padx=(0, 10))
-        
-        ttk.Button(file_frame, text="Procurar", command=self.selecionar_imagem, style='Wood.TButton').pack(side='right')
-        
-        # Parâmetros de usinagem
-        params_frame = ttk.Frame(parent, style='Wood.TFrame')
-        params_frame.pack(fill='x', pady=15)
-        
-        # Grid de parâmetros
-        self.entry_largura = self.create_parameter(params_frame, "Largura (mm):", "200", 0)
-        self.entry_altura = self.create_parameter(params_frame, "Altura (mm):", "150", 1)
-        self.entry_profundidade = self.create_parameter(params_frame, "Profundidade Max (mm):", "4", 2)
-        self.entry_passo = self.create_parameter(params_frame, "Passo (mm):", "1.0", 3)
-        
-        # Botão de geração
-        generate_btn = ttk.Button(parent, text="🪚 GERAR ENTALHE EM MADEIRA", 
-                                 command=self.gerar_entalhe, style='Wood.TButton')
-        generate_btn.pack(pady=20)
-        
-        # Status
-        self.status_label = ttk.Label(parent, text="Pronto para criar entalhe em madeira", style='Wood.TLabel')
-        self.status_label.pack()
-        
-    def create_parameter(self, parent, label, default, row):
-        """Cria um campo de parâmetro"""
-        ttk.Label(parent, text=label, style='Wood.TLabel').grid(row=row, column=0, sticky='w', pady=5, padx=(0, 10))
-        entry = ttk.Entry(parent, width=10)
-        entry.insert(0, default)
-        entry.grid(row=row, column=1, sticky='w', pady=5)
-        return entry
-        
-    def selecionar_imagem(self):
-        caminho = filedialog.askopenfilename(
-            title="Selecionar imagem para entalhe",
-            filetypes=[("Imagens", "*.png;*.jpg;*.jpeg;*.bmp;*.tiff")]
-        )
-        if caminho:
-            self.entry_imagem.delete(0, tk.END)
-            self.entry_imagem.insert(0, caminho)
-            self.status_label.config(text=f"Imagem carregada: {os.path.basename(caminho)}")
-            
-    def gerar_entalhe(self):
-        """Função principal para gerar entalhe em madeira"""
+        # Visualização do relatório
+        self.report_text = tk.Text(report_frame, height=15, width=80, bg='#F5F5DC', fg='#333333')
+        self.report_text.pack(fill='both', expand=True, pady=10)
+    
+    def analisar_projeto(self):
+        """Executa análise completa do projeto"""
         try:
-            img_path = self.entry_imagem.get()
-            if not img_path or not os.path.exists(img_path):
-                messagebox.showwarning("Aviso", "Selecione uma imagem válida.")
+            if not hasattr(self, 'current_z_map'):
+                messagebox.showwarning("Aviso", "Gere um entalhe primeiro para analisar.")
                 return
-
-            # Coletar parâmetros
-            params = {
-                'largura_mm': float(self.entry_largura.get()),
-                'altura_mm': float(self.entry_altura.get()),
-                'profundidade_max': float(self.entry_profundidade.get()),
-                'passo': float(self.entry_passo.get()),
-                'safe_z': 5.0,
-                'wood_type': self.tipo_madeira.get(),
-                'grain_direction': self.direcao_veio.get()
-            }
-
-            self.status_label.config(text="Processando imagem para madeira...")
+            
+            self.analysis_text.delete(1.0, tk.END)
+            self.analysis_text.insert(tk.END, "🔍 Analisando viabilidade...\n\n")
             self.root.update()
             
-            # Processar
-            success = self.processar_entalhe_madeira(img_path, params)
-            
-            if success:
-                self.status_label.config(text="✅ Entalhe gerado com sucesso!")
-                messagebox.showinfo("Sucesso!", "Entalhe em madeira gerado!\n\nVerifique a pasta 'WoodCarving_Output'")
-            else:
-                self.status_label.config(text="❌ Erro no processamento")
-                
-        except Exception as e:
-            self.status_label.config(text="❌ Erro no processamento")
-            messagebox.showerror("Erro", f"Falha: {str(e)}")
-
-    def processar_entalhe_madeira(self, img_path, params):
-        """Processamento completo para entalhe em madeira"""
-        try:
-            output_dir = os.path.join(os.getcwd(), "WoodCarving_Output")
-            os.makedirs(output_dir, exist_ok=True)
-
-            # Carregar e preparar imagem
-            img = Image.open(img_path).convert("L")
-            img_array_original = np.array(img) / 255.0
-            
-            # Calcular dimensões
-            img_ratio = img.width / img.height
-            target_ratio = params['largura_mm'] / params['altura_mm']
-            
-            if img_ratio > target_ratio:
-                new_width = int(params['largura_mm'] / params['passo'])
-                new_height = int(new_width / img_ratio)
-            else:
-                new_height = int(params['altura_mm'] / params['passo'])
-                new_width = int(new_height * img_ratio)
-            
-            # Redimensionar
-            img_resized = img.resize((new_width, new_height), Image.LANCZOS)
-            img_array = np.array(img_resized) / 255.0
-            
-            # PROCESSAMENTO ESPECÍFICO PARA MADEIRA
-            z_map = self.wood_ai.processar_para_madeira(
-                img_array, 
-                params['profundidade_max'],
-                params['wood_type'],
-                params['grain_direction']
+            # Executar análise
+            analysis = self.analyzer.analisar_viabilidade(
+                self.current_z_map, 
+                self.current_params,
+                self.tipo_madeira.get()
             )
             
-            # Garantir dados válidos
-            z_map = np.nan_to_num(z_map, nan=0.0)
-            z_map = np.clip(z_map, 0.0, params['profundidade_max'])
+            # Gerar estratégia
+            complexity = "high" if analysis["statistics"]["detail_density"] > 0.4 else "medium"
+            strategy = self.strategy_gen.gerar_estrategia_completa(
+                self.current_z_map, 
+                self.tipo_madeira.get(),
+                complexity
+            )
             
-            # Salvar visualização
-            self.salvar_visualizacao_madeira(img_array, z_map, output_dir, params)
+            # Exibir resultados
+            self.exibir_resultados_analise(analysis, strategy)
             
-            # Gerar G-code para madeira
-            gcode_path = os.path.join(output_dir, "entalhe_madeira.nc")
-            params['output_path'] = gcode_path
+            # Salvar dados atuais para relatório
+            self.current_analysis = analysis
+            self.current_strategy = strategy
             
-            success = self.gcode_gen.gerar_gcode_madeira(z_map, params)
-            
-            return success
-
         except Exception as e:
-            print(f"Erro no processamento madeira: {str(e)}")
-            return False
-
-    def salvar_visualizacao_madeira(self, img_original, z_map, output_dir, params):
-        """Salva visualização específica para madeira"""
+            self.analysis_text.insert(tk.END, f"❌ Erro na análise: {str(e)}")
+    
+    def exibir_resultados_analise(self, analysis, strategy):
+        """Exibe resultados da análise na interface"""
+        text = self.analysis_text
+        
+        # Cabeçalho
+        text.insert(tk.END, "="*60 + "\n")
+        text.insert(tk.END, "📊 RELATÓRIO DE ANÁLISE DE VIABILIDADE\n")
+        text.insert(tk.END, "="*60 + "\n\n")
+        
+        # Status de viabilidade
+        if analysis["viable"]:
+            text.insert(tk.END, "✅ PROJETO VIÁVEL\n", "green")
+        else:
+            text.insert(tk.END, "❌ PROJETO NÃO VIÁVEL\n", "red")
+        
+        text.insert(tk.END, "\n")
+        
+        # Estatísticas
+        stats = analysis["statistics"]
+        text.insert(tk.END, "📈 ESTATÍSTICAS PRINCIPAIS:\n")
+        text.insert(tk.END, f"• Profundidade máxima: {stats['max_depth']:.1f} mm\n")
+        text.insert(tk.END, f"• Profundidade mínima: {stats['min_depth']:.1f} mm\n")
+        text.insert(tk.END, f"• Variação total: {stats['depth_range']:.1f} mm\n")
+        text.insert(tk.END, f"• Menor característica: {stats['smallest_feature']:.1f} mm\n")
+        text.insert(tk.END, f"• Densidade de detalhes: {stats['detail_density']:.1%}\n")
+        text.insert(tk.END, f"• Inclinação máxima: {stats['max_slope']:.1f}°\n")
+        
+        text.insert(tk.END, "\n")
+        
+        # Alertas
+        if analysis["warnings"]:
+            text.insert(tk.END, "⚠️ ALERTAS:\n")
+            for warning in analysis["warnings"]:
+                text.insert(tk.END, f"• {warning}\n")
+            text.insert(tk.END, "\n")
+        
+        # Estratégia
+        text.insert(tk.END, "🛠️ ESTRATÉGIA RECOMENDADA:\n")
+        text.insert(tk.END, f"• Tempo estimado: {strategy['estimated_time']:.0f} minutos\n")
+        text.insert(tk.END, f"• Passes de desbaste: {strategy['roughing']['num_passes']}\n")
+        text.insert(tk.END, f"• Estratégias de acabamento: {len(strategy['finishing'])}\n")
+        
+        text.insert(tk.END, "\n")
+        
+        # Recomendações
+        if analysis["recommendations"]:
+            text.insert(tk.END, "💡 RECOMENDAÇÕES:\n")
+            for rec in analysis["recommendations"]:
+                text.insert(tk.END, f"• {rec}\n")
+        
+        # Configurar cores
+        text.tag_configure("green", foreground="green")
+        text.tag_configure("red", foreground="red")
+    
+    def gerar_relatorio(self):
+        """Gera relatório profissional completo"""
         try:
-            fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-            fig.suptitle(f'Análise para Entalhe em Madeira ({params["wood_type"].upper()})', fontsize=16)
+            if not hasattr(self, 'current_analysis'):
+                messagebox.showwarning("Aviso", "Execute uma análise primeiro.")
+                return
             
-            # Imagem original
-            axes[0,0].imshow(img_original, cmap='gray')
-            axes[0,0].set_title('Imagem Original')
-            axes[0,0].axis('off')
+            # Preparar dados para relatório
+            report_data = {
+                "project_name": self.entry_project_name.get(),
+                "wood_type": self.tipo_madeira.get(),
+                "grain_direction": self.direcao_veio.get(),
+                "params": self.current_params,
+                "feasibility_analysis": self.current_analysis,
+                "machining_strategy": self.current_strategy,
+                "timestamp": datetime.now().isoformat()
+            }
             
-            # Mapa de profundidade
-            im = axes[0,1].imshow(z_map, cmap='terrain')
-            axes[0,1].set_title('Mapa de Profundidade (mm)')
-            axes[0,1].axis('off')
-            plt.colorbar(im, ax=axes[0,1])
+            # Gerar relatório
+            output_dir = os.path.join(os.getcwd(), "WoodCarving_Output")
+            os.makedirs(output_dir, exist_ok=True)
             
-            # Perfil 3D
-            from mpl_toolkits.mplot3d import Axes3D
-            x = np.arange(z_map.shape[1])
-            y = np.arange(z_map.shape[0])
-            X, Y = np.meshgrid(x, y)
+            report_path = os.path.join(output_dir, "relatorio_entalhe.txt")
             
-            ax3d = fig.add_subplot(2, 2, (3, 4), projection='3d')
-            surf = ax3d.plot_surface(X, Y, z_map, cmap='terrain', alpha=0.8)
-            ax3d.set_title('Visualização 3D do Entalhe')
+            success = self.report_gen.gerar_relatorio_completo(report_data, report_path)
             
-            # Histograma de profundidades
-            axes[1,1].hist(z_map.flatten(), bins=50, alpha=0.7, color='brown')
-            axes[1,1].set_title('Distribuição de Profundidades')
-            axes[1,1].set_xlabel('Profundidade (mm)')
-            axes[1,1].set_ylabel('Frequência')
+            if success:
+                # Exibir relatório na interface
+                with open(report_path, 'r', encoding='utf-8') as f:
+                    report_content = f.read()
+                
+                self.report_text.delete(1.0, tk.END)
+                self.report_text.insert(tk.END, report_content)
+                
+                messagebox.showinfo("Sucesso", f"Relatório gerado:\n{report_path}")
+            else:
+                messagebox.showerror("Erro", "Falha ao gerar relatório.")
+                
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao gerar relatório: {str(e)}")
+    
+    def salvar_analise(self):
+        """Salva análise em arquivo JSON"""
+        try:
+            if not hasattr(self, 'current_analysis'):
+                messagebox.showwarning("Aviso", "Execute uma análise primeiro.")
+                return
             
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, 'analise_entalhe_madeira.png'), 
-                       dpi=150, bbox_inches='tight')
-            plt.close()
+            output_dir = os.path.join(os.getcwd(), "WoodCarving_Output")
+            os.makedirs(output_dir, exist_ok=True)
+            
+            analysis_data = {
+                "analysis": self.current_analysis,
+                "strategy": self.current_strategy,
+                "params": self.current_params,
+                "wood_type": self.tipo_madeira.get(),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            file_path = os.path.join(output_dir, "analise_projeto.json")
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(analysis_data, f, indent=2, ensure_ascii=False)
+            
+            messagebox.showinfo("Sucesso", f"Análise salva:\n{file_path}")
             
         except Exception as e:
-            print(f"Erro ao salvar visualização: {e}")
+            messagebox.showerror("Erro", f"Falha ao salvar análise: {str(e)}")
+    
+    def processar_entalhe_madeira(self, img_path, params):
+        """Sobrescreve método para salvar dados atuais"""
+        success = super().processar_entalhe_madeira(img_path, params)
+        
+        if success and hasattr(self, 'current_z_map'):
+            # Salvar parâmetros atuais para análise
+            self.current_params = params.copy()
+            
+        return success
 
 # ==============================================
-# EXECUÇÃO
+# EXECUÇÃO DO SISTEMA COMPLETO
 # ==============================================
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = WoodCarvingApp(root)
+    app = AdvancedWoodCarvingApp(root)
+    
+    # Configurar ícone e título
+    root.title("🪵 Wood Carving Studio Pro - Edição Avançada")
+    
+    # Centralizar janela
+    window_width = 1000
+    window_height = 800
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    x = (screen_width - window_width) // 2
+    y = (screen_height - window_height) // 2
+    root.geometry(f"{window_width}x{window_height}+{x}+{y}")
+    
     root.mainloop()
     
