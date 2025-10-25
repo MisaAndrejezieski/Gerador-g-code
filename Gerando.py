@@ -1,157 +1,276 @@
 import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from PIL import Image, ImageOps, ImageFilter
+from PIL import Image, ImageOps, ImageFilter, ImageEnhance
 import numpy as np
+import cv2
 
 # ==============================================
-# Funções principais
+# FUNÇÕES OTIMIZADAS
 # ==============================================
 
-def processar_imagem(img_path, largura_mm, altura_mm, profundidade_max, passo, feedrate, safe_z):
+def processar_imagem(img_path, largura_mm, altura_mm, profundidade_max, passo, feedrate, safe_z, tipo_relevo="baixo"):
     try:
         # Criar diretório de saída
-        output_dir = os.path.join(os.getcwd(), "Imagens")
+        output_dir = os.path.join(os.getcwd(), "Imagens_Processadas")
         os.makedirs(output_dir, exist_ok=True)
 
         # Abrir e tratar imagem
         img = Image.open(img_path).convert("L")
-        img = ImageOps.autocontrast(img)
+        
+        # PRÉ-PROCESSAMENTO MELHORADO
+        img = ImageEnhance.Contrast(img).enhance(1.5)  # Aumenta contraste
         img = img.filter(ImageFilter.SMOOTH_MORE)
-        img = ImageOps.invert(img)
-
-        # Redimensionar conforme proporção original
-        img_resized = img.resize((int(largura_mm / passo), int(altura_mm / passo)), Image.LANCZOS)
+        img = img.filter(ImageFilter.SHARPEN)  # Realça detalhes
+        
+        # CORREÇÃO: Respeitar proporção original da imagem
+        img_ratio = img.width / img.height
+        target_ratio = largura_mm / altura_mm
+        
+        if img_ratio > target_ratio:
+            # Imagem mais larga
+            new_width = int(largura_mm / passo)
+            new_height = int(new_width / img_ratio)
+        else:
+            # Imagem mais alta
+            new_height = int(altura_mm / passo)
+            new_width = int(new_height * img_ratio)
+        
+        # Redimensionar mantendo proporção
+        img_resized = img.resize((new_width, new_height), Image.LANCZOS)
         img_array = np.array(img_resized) / 255.0
 
-        # Normalizar profundidade
-        z_map = -img_array * profundidade_max  # negativo = cortar para baixo
+        # CONTROLE DE TIPO DE RELEVO
+        if tipo_relevo == "baixo":
+            z_map = (1 - img_array) * profundidade_max  # Áreas claras = mais profundas
+        else:  # alto relevo
+            z_map = img_array * profundidade_max  # Áreas escuras = mais profundas
+
+        # Suavizar transições (evita movimentos bruscos)
+        kernel = np.ones((3,3), np.float32)/9
+        z_map_smooth = cv2.filter2D(z_map, -1, kernel)
 
         # Salvar imagem tratada
-        heightmap_img = Image.fromarray(np.uint8((img_array) * 255))
-        heightmap_path = os.path.join(output_dir, "Heightmap.png")
+        heightmap_img = Image.fromarray(np.uint8((z_map_smooth / profundidade_max) * 255))
+        heightmap_path = os.path.join(output_dir, "Heightmap_Processado.png")
         heightmap_img.save(heightmap_path)
 
-        # Gerar G-code
-        gcode_path = os.path.join(output_dir, "3d.nc")
-        with open(gcode_path, "w") as f:
-            f.write(f"(G-code gerado automaticamente)\n")
-            f.write("G21 ; Unidades em mm\n")
-            f.write("G90 ; Modo absoluto\n")
-            f.write(f"G0 Z{safe_z:.3f}\n")
-
-            linhas, colunas = z_map.shape
-            for y in range(linhas):
-                if y % 2 == 0:
-                    x_range = range(colunas)
-                else:
-                    x_range = range(colunas - 1, -1, -1)
-
-                for x in x_range:
-                    z = z_map[y, x]
-                    pos_x = x * passo
-                    pos_y = y * passo
-                    f.write(f"G1 X{pos_x:.3f} Y{pos_y:.3f} Z{z:.3f} F{feedrate}\n")
-                f.write(f"G0 Z{safe_z:.3f}\n")
-
-            f.write("G0 X0 Y0\nM30 ; Fim do programa\n")
+        # GERAR G-CODE OTIMIZADO
+        gcode_path = os.path.join(output_dir, "relevo_3d_otimizado.nc")
+        gerar_gcode_otimizado(z_map_smooth, passo, feedrate, safe_z, gcode_path, largura_mm, new_width, new_height)
 
         return heightmap_path, gcode_path
 
     except Exception as e:
-        messagebox.showerror("Erro", f"Ocorreu um erro ao processar: {e}")
+        messagebox.showerror("Erro", f"Ocorreu um erro ao processar: {str(e)}")
         return None, None
 
+def gerar_gcode_otimizado(z_map, passo, feedrate, safe_z, gcode_path, largura_mm, img_width, img_height):
+    with open(gcode_path, "w") as f:
+        # CABEÇALHO MELHORADO
+        f.write("(G-code para Relevo 3D - Gerado Automaticamente)\n")
+        f.write("G21 ; Unidades em mm\n")
+        f.write("G90 ; Posicionamento absoluto\n")
+        f.write("G17 ; Plano XY\n")
+        f.write("G94 ; Avanço em mm/min\n")
+        f.write("G49 ; Cancela compensação de comprimento\n\n")
+        
+        # POSICIONAMENTO INICIAL
+        f.write(f"; === INICIO DO CORTE ===\n")
+        f.write(f"G0 Z{safe_z:.3f} ; Eleva para Safe Z\n")
+        f.write(f"G0 X0 Y0 ; Posiciona na origem\n\n")
+        
+        linhas, colunas = z_map.shape
+        f.write(f"; Dimensões: {colunas}x{linhas} pontos, Passo: {passo}mm\n")
+        f.write(f"F{feedrate} ; Define velocidade de avanço\n\n")
+        
+        # ESTRATÉGIA DE CORTE MELHORADA
+        for y in range(linhas):
+            # Determina direção (zig-zag)
+            if y % 2 == 0:
+                x_range = range(colunas)
+            else:
+                x_range = range(colunas - 1, -1, -1)
+            
+            primeiro_ponto = True
+            
+            for x in x_range:
+                z = z_map[y, x]
+                pos_x = (x * passo) - (img_width * passo / 2)  # Centraliza no eixo X
+                pos_y = (y * passo) - (img_height * passo / 2)  # Centraliza no eixo Y
+                
+                if primeiro_ponto:
+                    # Move para primeiro ponto da linha com Safe Z
+                    f.write(f"G0 X{pos_x:.3f} Y{pos_y:.3f} ; Posiciona na linha {y}\n")
+                    f.write(f"G1 Z{z:.3f} ; Desce para cortar\n")
+                    primeiro_ponto = False
+                else:
+                    # Movimento de corte contínuo
+                    f.write(f"G1 X{pos_x:.3f} Y{pos_y:.3f} Z{z:.3f} ; Corte\n")
+            
+            # CORREÇÃO: Só sobe para Safe Z se necessário (mudança de área)
+            if y < linhas - 1:
+                # Verifica se próxima linha está muito longe
+                next_y = y + 1
+                if abs(z_map[y, x] - z_map[next_y, x]) > 2:  # Se diferença > 2mm
+                    f.write(f"G0 Z{safe_z:.3f} ; Eleva para transição segura\n")
+        
+        # FINALIZAÇÃO
+        f.write(f"\n; === FINALIZACAO ===\n")
+        f.write(f"G0 Z{safe_z:.3f} ; Retorna para Safe Z\n")
+        f.write("G0 X0 Y0 ; Volta para origem\n")
+        f.write("M5 ; Desliga spindle\n")
+        f.write("M30 ; Fim do programa\n")
+        
+        # ESTATÍSTICAS
+        f.write(f"\n; === ESTATISTICAS ===\n")
+        f.write(f"; Pontos totais: {linhas * colunas}\n")
+        f.write(f"; Dimensão real: {img_width * passo:.1f} x {img_height * passo:.1f} mm\n")
+        f.write(f"; Tempo estimado: {(linhas * colunas * passo) / (feedrate / 60):.1f} minutos\n")
 
 # ==============================================
-# Interface Gráfica
+# INTERFACE GRÁFICA MELHORADA
 # ==============================================
 
-def selecionar_imagem():
-    caminho = filedialog.askopenfilename(filetypes=[("Imagens", "*.png;*.jpg;*.jpeg;*.bmp")])
-    if caminho:
-        entry_imagem.delete(0, tk.END)
-        entry_imagem.insert(0, caminho)
-
-def gerar():
-    try:
-        img_path = entry_imagem.get()
-        if not os.path.exists(img_path):
-            messagebox.showwarning("Aviso", "Selecione uma imagem válida.")
-            return
-
-        largura_mm = float(entry_largura.get())
-        altura_mm = float(entry_altura.get())
-        profundidade_max = float(entry_profundidade.get())
-        passo = float(entry_passo.get())
-        feedrate = float(entry_feed.get())
-        safe_z = float(entry_safez.get())
-
-        heightmap, gcode = processar_imagem(
-            img_path, largura_mm, altura_mm, profundidade_max, passo, feedrate, safe_z
+class GeradorCNC:
+    def __init__(self, root):
+        self.root = root
+        self.setup_ui()
+        
+    def setup_ui(self):
+        self.root.title("Gerador de G-code - CNC Router 3D")
+        self.root.geometry("650x600")
+        self.root.resizable(True, True)
+        
+        # Configurar estilo
+        self.setup_styles()
+        
+        # Frame principal
+        main_frame = ttk.Frame(self.root, padding=20)
+        main_frame.pack(fill="both", expand=True)
+        
+        # Título
+        title = ttk.Label(main_frame, text="GERADOR DE RELEVO 3D PARA CNC", 
+                         font=("Segoe UI", 16, "bold"))
+        title.grid(row=0, column=0, columnspan=3, pady=(0, 20))
+        
+        # Campos da interface
+        self.create_widgets(main_frame)
+        
+    def setup_styles(self):
+        style = ttk.Style()
+        style.configure("TLabel", font=("Segoe UI", 10))
+        style.configure("TButton", font=("Segoe UI", 10, "bold"))
+        style.configure("Title.TLabel", font=("Segoe UI", 11, "bold"))
+        
+    def create_widgets(self, parent):
+        row = 1
+        
+        # Imagem de entrada
+        ttk.Label(parent, text="Imagem de Entrada:", style="Title.TLabel").grid(row=row, column=0, sticky="w", pady=(10,5))
+        row += 1
+        
+        self.entry_imagem = ttk.Entry(parent, width=50)
+        self.entry_imagem.grid(row=row, column=0, padx=5, pady=5, sticky="ew")
+        ttk.Button(parent, text="Selecionar", command=self.selecionar_imagem).grid(row=row, column=1, padx=5)
+        row += 1
+        
+        # Tipo de relevo
+        ttk.Label(parent, text="Tipo de Relevo:", style="Title.TLabel").grid(row=row, column=0, sticky="w", pady=(10,5))
+        row += 1
+        
+        self.tipo_relevo = tk.StringVar(value="baixo")
+        ttk.Radiobutton(parent, text="Baixo Relevo", variable=self.tipo_relevo, value="baixo").grid(row=row, column=0, sticky="w")
+        ttk.Radiobutton(parent, text="Alto Relevo", variable=self.tipo_relevo, value="alto").grid(row=row, column=1, sticky="w")
+        row += 1
+        
+        # Parâmetros de usinagem
+        params = [
+            ("Largura (mm):", "200", "entry_largura"),
+            ("Altura (mm):", "150", "entry_altura"),
+            ("Profundidade máxima (mm):", "3", "entry_profundidade"),
+            ("Passo entre pontos (mm):", "1", "entry_passo"),
+            ("Velocidade de avanço (mm/min):", "1000", "entry_feed"),
+            ("Safe Z (mm):", "5", "entry_safez")
+        ]
+        
+        for label, default, attr_name in params:
+            ttk.Label(parent, text=label, style="Title.TLabel").grid(row=row, column=0, sticky="w", pady=(10,5))
+            row += 1
+            
+            entry = ttk.Entry(parent)
+            entry.insert(0, default)
+            entry.grid(row=row, column=0, pady=5, sticky="ew")
+            setattr(self, attr_name, entry)
+            row += 1
+        
+        # Botão gerar
+        ttk.Button(parent, text="🎯 GERAR G-CODE OTIMIZADO", 
+                  command=self.gerar, style="TButton").grid(row=row, column=0, columnspan=2, pady=20)
+        row += 1
+        
+        # Rodapé
+        ttk.Label(parent, text="© 2025 - CNC Router 3D - Versão Otimizada", 
+                 font=("Segoe UI", 8), foreground="gray").grid(row=row, column=0, columnspan=2, pady=10)
+        
+        # Configurar grid
+        parent.columnconfigure(0, weight=1)
+    
+    def selecionar_imagem(self):
+        caminho = filedialog.askopenfilename(
+            title="Selecionar imagem",
+            filetypes=[("Imagens", "*.png;*.jpg;*.jpeg;*.bmp;*.tiff")]
         )
+        if caminho:
+            self.entry_imagem.delete(0, tk.END)
+            self.entry_imagem.insert(0, caminho)
+    
+    def gerar(self):
+        try:
+            img_path = self.entry_imagem.get()
+            if not os.path.exists(img_path):
+                messagebox.showwarning("Aviso", "Selecione uma imagem válida.")
+                return
 
-        if gcode:
-            messagebox.showinfo("Sucesso", f"G-code gerado com sucesso!\n\nArquivos salvos em:\n{os.path.dirname(gcode)}")
-    except Exception as e:
-        messagebox.showerror("Erro", f"Falha ao gerar: {e}")
+            # Coletar parâmetros
+            params = {
+                'largura_mm': float(self.entry_largura.get()),
+                'altura_mm': float(self.entry_altura.get()),
+                'profundidade_max': float(self.entry_profundidade.get()),
+                'passo': float(self.entry_passo.get()),
+                'feedrate': float(self.entry_feed.get()),
+                'safe_z': float(self.entry_safez.get()),
+                'tipo_relevo': self.tipo_relevo.get()
+            }
 
+            # Validar parâmetros
+            if params['passo'] < 0.1:
+                messagebox.showerror("Erro", "Passo muito pequeno! Use no mínimo 0.1mm")
+                return
+                
+            if params['profundidade_max'] > 10:
+                if not messagebox.askyesno("Confirmação", "Profundidade maior que 10mm. Tem certeza?"):
+                    return
+
+            heightmap, gcode = processar_imagem(img_path, **params)
+
+            if gcode:
+                messagebox.showinfo("Sucesso", 
+                    f"✅ G-code gerado com sucesso!\n\n"
+                    f"📁 Pasta: {os.path.dirname(gcode)}\n"
+                    f"📊 Arquivos: Heightmap + G-code\n"
+                    f"⚡ Estratégia: Corte contínuo otimizado")
+
+        except ValueError as e:
+            messagebox.showerror("Erro", f"Valor inválido: {str(e)}")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao gerar: {str(e)}")
 
 # ==============================================
-# Janela Principal
+# EXECUÇÃO
 # ==============================================
 
-root = tk.Tk()
-root.title("Gerador de G-code - Relevo 3D para CNC")
-root.geometry("600x500")
-root.resizable(False, False)
-
-style = ttk.Style(root)
-style.configure("TLabel", font=("Segoe UI", 10))
-style.configure("TButton", font=("Segoe UI", 10, "bold"))
-style.configure("TEntry", font=("Segoe UI", 10))
-
-frame = ttk.Frame(root, padding=20)
-frame.pack(fill="both", expand=True)
-
-# Campos
-ttk.Label(frame, text="Imagem de entrada:").grid(row=0, column=0, sticky="w")
-entry_imagem = ttk.Entry(frame, width=50)
-entry_imagem.grid(row=1, column=0, padx=5, pady=5)
-ttk.Button(frame, text="Selecionar", command=selecionar_imagem).grid(row=1, column=1, padx=5)
-
-ttk.Label(frame, text="Largura (mm):").grid(row=2, column=0, sticky="w", pady=(10,0))
-entry_largura = ttk.Entry(frame)
-entry_largura.insert(0, "2000")
-entry_largura.grid(row=3, column=0, pady=5)
-
-ttk.Label(frame, text="Altura (mm):").grid(row=4, column=0, sticky="w")
-entry_altura = ttk.Entry(frame)
-entry_altura.insert(0, "3000")
-entry_altura.grid(row=5, column=0, pady=5)
-
-ttk.Label(frame, text="Profundidade máxima (mm):").grid(row=6, column=0, sticky="w")
-entry_profundidade = ttk.Entry(frame)
-entry_profundidade.insert(0, "6")
-entry_profundidade.grid(row=7, column=0, pady=5)
-
-ttk.Label(frame, text="Passo entre linhas (mm):").grid(row=8, column=0, sticky="w")
-entry_passo = ttk.Entry(frame)
-entry_passo.insert(0, "2")
-entry_passo.grid(row=9, column=0, pady=5)
-
-ttk.Label(frame, text="Velocidade de avanço (mm/min):").grid(row=10, column=0, sticky="w")
-entry_feed = ttk.Entry(frame)
-entry_feed.insert(0, "800")
-entry_feed.grid(row=11, column=0, pady=5)
-
-ttk.Label(frame, text="Safe Z (mm):").grid(row=12, column=0, sticky="w")
-entry_safez = ttk.Entry(frame)
-entry_safez.insert(0, "5")
-entry_safez.grid(row=13, column=0, pady=5)
-
-ttk.Button(frame, text="GERAR G-CODE", command=gerar).grid(row=14, column=0, columnspan=2, pady=20)
-
-ttk.Label(frame, text="© 2025 - Gerador CNC by Misael & GPT-5", font=("Segoe UI", 8)).grid(row=15, column=0, columnspan=2, pady=10)
-
-root.mainloop()
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = GeradorCNC(root)
+    root.mainloop()
