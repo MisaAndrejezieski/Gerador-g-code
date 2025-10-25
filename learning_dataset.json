@@ -1,0 +1,38 @@
+[
+  {
+    "timestamp": "2025-10-25T17:11:17.435323",
+    "features": {
+      "mean_intensity": 0.9173217138707336,
+      "std_intensity": 0.08689013917926658,
+      "contrast": 0.603921568627451,
+      "edge_density": 0.22185185185185186,
+      "hist_bin_0": 15.0,
+      "hist_bin_1": 73.0,
+      "hist_bin_2": 317.0,
+      "hist_bin_3": 851.0,
+      "hist_bin_4": 4144.0,
+      "wood_type": 0,
+      "grain_direction": 1,
+      "profundidade_max": 6.0,
+      "passo": 1.0
+    },
+    "params": {
+      "largura_mm": 60.0,
+      "altura_mm": 150.0,
+      "profundidade_max": 6.0,
+      "passo": 1.0,
+      "safe_z": 5.0,
+      "wood_type": "soft",
+      "grain_direction": "vertical",
+      "modo_ia": "art",
+      "output_path": "D:\\Gerando g-code\\Gerador-g-code\\WoodCarving_Output\\entalhe_170959.nc"
+    },
+    "user_rating": 5,
+    "user_notes": "relevo está ruim.",
+    "z_map_stats": {
+      "mean_depth": 0.5096292374727664,
+      "max_depth": 6.0,
+      "std_depth": 1.0640407190917878
+    }
+  }
+]
