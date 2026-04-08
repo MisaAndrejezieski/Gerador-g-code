@@ -3,8 +3,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageOps, ImageFilter, ImageEnhance
 import numpy as np
-import cv2 misael
-import matplotlib.pyplot as plt
+import cv2 
+import matplotlib.pyplot as pltp
 from mpl_toolkits.mplot3d import Axes3D
 import json
 import time
